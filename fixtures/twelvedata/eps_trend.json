@@ -1,0 +1,9 @@
+{"meta": {"symbol": "AAPL", "name": "Apple Inc.", "currency": "USD",
+  "exchange_timezone": "America/New_York", "exchange": "NASDAQ",
+  "mic_code": "XNGS", "type": "Common Stock"},
+ "eps_trend": [
+  {"date": "2026-09-30", "period": "current_quarter", "current_estimate": 1.97754, "7_days_ago": 1.97656, "30_days_ago": 1.97656, "60_days_ago": 2.00825, "90_days_ago": 2.00801},
+  {"date": "2026-12-31", "period": "next_quarter",    "current_estimate": 2.90471, "7_days_ago": 2.89268, "30_days_ago": 2.90859, "60_days_ago": 2.94960, "90_days_ago": 2.94699},
+  {"date": "2026-09-30", "period": "current_year",    "current_estimate": 8.82155, "7_days_ago": 8.81248, "30_days_ago": 8.80708, "60_days_ago": 8.75950, "90_days_ago": 8.75697},
+  {"date": "2027-09-30", "period": "next_year",       "current_estimate": 9.56757, "7_days_ago": 9.53289, "30_days_ago": 9.53948, "60_days_ago": 9.68261, "90_days_ago": 9.66694}
+ ], "status": "ok"}
