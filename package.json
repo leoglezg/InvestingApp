@@ -1,0 +1,22 @@
+{
+  "name": "investing-app",
+  "version": "0.1.0",
+  "description": "Sistema de apoyo a decisiones de inversión basado en evidencia histórica",
+  "type": "module",
+  "private": true,
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "db:migrate": "node scripts/migrate.mjs",
+    "test": "node --test --experimental-strip-types tests/*.test.ts"
+  },
+  "dependencies": {
+    "pg": "^8.13.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "@types/pg": "^8.11.10",
+    "typescript": "^5.7.2"
+  }
+}

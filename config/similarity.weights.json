@@ -1,0 +1,57 @@
+{
+  "version": "v0-hypothesis",
+  "validation_status": "hypothesis",
+  "last_validated_at": null,
+  "created_at": "2026-09-14",
+
+  "_LEY_4": "Estos pesos son HIPÓTESIS, no parámetros validados científicamente. Mientras validation_status sea 'hypothesis', TODA salida del sistema debe marcarse como NO VALIDADA. Cambiarlos requiere evidencia out-of-sample, nunca criterio.",
+
+  "_PROHIBIDO": "Ajustar estos valores mirando el resultado del test set. Eso es overfitting e invalida la validación entera (antipatrón spec §7).",
+
+  "weights": {
+    "surprise_alignment": 0.25,
+    "event_type": 0.20,
+    "macro_distance": 0.20,
+    "sentiment": 0.10,
+    "magnitude": 0.10,
+    "asset_overlap": 0.10,
+    "volatility_regime": 0.05
+  },
+
+  "_rationale": {
+    "surprise_alignment": "El peso mayor porque el mercado reacciona a la diferencia con lo esperado, no al dato (spec §2). Hipótesis, no medición.",
+    "macro_distance": "La spec exige comparar bajo régimen macro similar; el mismo evento en 2021 y en 2023 no es comparable.",
+    "asset_overlap": "Bajo deliberadamente: dos eventos pueden ser análogos afectando a activos distintos.",
+    "volatility_regime": "El menor por solaparse parcialmente con macro_distance.",
+    "_ausente_keywords": "El código auditado daba 15% a solapamiento de keywords. Eliminado: comparar eventos por palabras compartidas es comparar por estilo de redacción del periodista, no por sustancia económica."
+  },
+
+  "hard_filters": {
+    "_comment": "Filtros duros: se aplican ANTES de puntuar. Un candidato que los incumple no se compara, por alto que sea su score.",
+
+    "surprise_sign_must_match": true,
+    "_surprise_sign": "spec §2: dos eventos del mismo tipo con signos de sorpresa opuestos NO son comparables. CPI por encima de consenso y CPI por debajo son eventos económicamente inversos.",
+
+    "surprise_availability_must_match": true,
+    "_surprise_availability": "Un evento sin sorpresa no tiene signo que filtrar, así que no puede compararse con uno que sí la tiene. Ver events.surprise_available."
+  },
+
+  "adaptive_threshold": {
+    "_comment": "LEY 4: el umbral adaptativo también es hipótesis, no ciencia. Con muestras pequeñas se exige más similitud para compensar la fragilidad estadística.",
+    "rules": [
+      { "min_sample_size": 30, "threshold": 0.60 },
+      { "min_sample_size": 15, "threshold": 0.70 },
+      { "min_sample_size": 0,  "threshold": 0.75 }
+    ],
+    "min_sample_for_output": 5,
+    "_min_sample": "Por debajo de esto no se emite proyección: se reporta 'evidencia insuficiente'. Una frecuencia sobre 3 casos no es evidencia."
+  },
+
+  "evidence_strength": {
+    "_comment": "LEY 5: dimensión categórica, NUNCA promediada con otras métricas.",
+    "strong": { "min_sample_size": 30, "min_regime_match_pct": 0.60 },
+    "moderate": { "min_sample_size": 15, "min_regime_match_pct": 0.40 },
+    "weak": { "min_sample_size": 5, "min_regime_match_pct": 0.0 },
+    "insufficient": null
+  }
+}
