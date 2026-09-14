@@ -289,6 +289,69 @@ backtesting**, por completa que sea.
 
 ---
 
+### 3.3 `yahoo-finance2` — evaluación iniciada, **bloqueada por allowlist**
+
+Candidato propuesto por el usuario. Se instaló (`npm install yahoo-finance2`, 110
+paquetes, 0 vulnerabilidades) y se intentó evaluar con llamadas reales.
+
+**Resultado: la librería funciona; el entorno la bloquea.**
+
+```
+search (noticias)  → BLOQUEADO  Host not in allowlist: query2.finance.yahoo.com
+chart (histórico)  → BLOQUEADO  Host not in allowlist: query2.finance.yahoo.com
+quote              → ERROR      No set-cookie header present in Yahoo's response
+quoteSummary       → ERROR      No set-cookie header present in Yahoo's response
+```
+
+El error del proxy es explícito y accionable: *"Add this host to your network egress
+settings to allow access."* Los dos errores de `set-cookie` corresponden al flujo de
+autenticación por cookie/crumb, que usa un host adicional. Verificado con `curl`
+directo: **los tres hosts devuelven HTTP 000 (bloqueados).**
+
+**Hosts a habilitar:**
+
+```
+query1.finance.yahoo.com
+query2.finance.yahoo.com
+fc.yahoo.com
+```
+
+> Nota: este bloqueo ocurre en una capa distinta al de §0. SEC EDGAR y GDELT fueron
+> rechazados en el CONNECT (`403 policy denial`); Yahoo es rechazado por **allowlist a
+> nivel de aplicación**, con un mensaje que nombra el remedio. Sugiere que la
+> allowlist es configurable en los ajustes de egress del entorno.
+
+#### Valoración anticipada — `NO VERIFICADO`, para decidir informado
+
+No sustituye a la evaluación real, pero hay dos riesgos que conviene conocer **antes**
+de invertir esfuerzo en habilitar los hosts:
+
+| Aspecto | Expectativa | Criterio |
+|---|---|---|
+| Flujo diario de noticias | 🟢 probablemente **sí** — cobertura densa, `providerPublishTime` con precisión de segundo, `publisher` identificable para tier, `relatedTickers` para atribución real | OP-6, §1.4 |
+| **Archivo histórico de noticias** | 🔴 probablemente **no** — `search()` devuelve noticias recientes y no acepta rango de fechas para noticias | **OP-1/OP-2, §1.2** |
+| **Licencia de almacenamiento** | 🔴 **riesgo alto** — no es una API pública oficial; son endpoints internos. Los T&C de Yahoo restringen el uso automatizado y la redistribución | **NR-4** |
+| Macro | ❌ no aplica — no cubre CPI, tipos, desempleo ni revisiones | MA-1/MA-2 |
+| Estabilidad | ⚠️ endpoints no documentados. El propio error *"Something must have changed, please report"* es síntoma de esa fragilidad | OP-5 |
+
+**Lectura:** resolvería **el flujo diario** —el requisito explícito del usuario— pero
+**no** el arranque en frío ni macro. Es una solución **parcial**, y NR-4 debe
+verificarse antes de construir un archivo persistente sobre ella.
+
+#### Hosts recomendados para habilitar de una vez
+
+Si se va a tocar la configuración de egress, conviene cubrir las tres categorías
+abiertas en la misma operación:
+
+| Categoría | Hosts | Qué desbloquea |
+|---|---|---|
+| Noticias — flujo | `query1.finance.yahoo.com`, `query2.finance.yahoo.com`, `fc.yahoo.com` | Requisito diario del usuario |
+| **Macro — *vintage*** | `api.stlouisfed.org` | **MA-1 y MA-2**, los bloqueantes más duros |
+| Noticias — Tier 1 | `data.sec.gov`, `www.sec.gov` | `verification_level: official` |
+| Noticias — archivo | `api.gdeltproject.org` | Arranque en frío (§1.2) |
+
+---
+
 ## 4. ESTADO DE LOS BLOQUEANTES
 
 | ID | Requisito | Estado | Cubierto por |
