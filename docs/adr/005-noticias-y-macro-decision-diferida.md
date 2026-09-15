@@ -1,7 +1,27 @@
 # ADR 005 — Noticias y macro: decisión deliberadamente diferida
 
-**Estado:** DIFERIDO — bloqueante de FASE 2
+**Estado:** ~~DIFERIDO~~ → **CERRADO el 2026-09-15**
 **Fecha:** 2026-09-14
+
+> ## ✅ CERRADO
+>
+> La política de red se amplió y las llamadas reales pudieron ejecutarse. Ambas
+> categorías tienen fuente:
+>
+> | Categoría | Resuelto por | Bloqueantes que cierra |
+> |---|---|---|
+> | Eventos Tier 1 | **SEC EDGAR** → ADR 006 | OP-6, §1.2, NR-4 |
+> | **Macro *vintage*** | **FRED/ALFRED** → ADR 007 | **MA-1, MA-2** |
+> | Noticias generales | **GDELT** (viable con reintentos) | §1.2b |
+>
+> Descartados con evidencia: **Yahoo Finance** (429 en 6 intentos acumulando
+> 240 s; rate limiting por IP de datacenter, no resoluble esperando).
+>
+> El criterio de revisión del §final se cumplió: hay fixtures reales para las
+> tres. **La decisión de no elegir por reputación resultó acertada**: FRED
+> confirmó lo que la documentación prometía, pero GDELT fue inicialmente
+> descartado por error y rehabilitado sólo al probarlo con paciencia — algo que
+> ninguna lectura de documentación habría corregido.
 
 ## Contexto
 

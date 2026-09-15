@@ -434,21 +434,68 @@ dos bloqueantes más duros de la spec.
 
 ### 3.4.4 Yahoo Finance — 🔴 **inviable desde este entorno**
 
-Alcanzable, pero **429 persistente** tras 5 reintentos con espera creciente
-(3 s → 15 s), tanto por `curl` como por Node con el proxy correcto.
+Alcanzable, pero **429 en los 6 intentos** de una prueba con espera creciente
+acumulando 240 s (0 → 15 → 30 → 45 → 60 → 90 s), tanto por `curl` como por Node
+con el proxy bien configurado.
 
-Es rate limiting por IP: el proxy sale por una dirección de datacenter compartida,
-y Yahoo las restringe. **No es un problema de allowlist y no se resuelve
-reintentando.** Se suma a las razones del ADR 003.
+Es rate limiting por IP: el proxy sale por una dirección de datacenter
+compartida, y Yahoo las restringe. **No es la allowlist y no se resuelve
+esperando más.** Se suma a las razones del ADR 003.
 
-### 3.4.5 GDELT — 🔴 **inviable desde este entorno**
+### 3.4.5 GDELT — ✅ **VIABLE con reintentos pacientes** *(corrección)*
 
-Alcanzable (HTTP 200 al dominio raíz), pero la API devuelve 429 con el texto:
+> **Corrección de una evaluación anterior.** En una primera ronda se concluyó
+> "inviable" tras dos intentos espaciados 6 s. **Era una conclusión precipitada**
+> y se rectifica: con espera suficiente, GDELT responde.
 
-> *"Please limit requests to one every 5 seconds..."*
+Prueba con backoff: **HTTP 200 en el segundo intento, tras ~15 s de espera.**
 
-Persistió tras esperar 6 s entre llamadas, lo que indica que la cuota se comparte
-con otros usuarios de la misma IP de salida. Misma conclusión que Yahoo.
+```
+GDELT-historico: intento 1 → HTTP 429
+GDELT-historico: OK en intento 2 (tras ~15s)
+   articulos en ventana historica: 5
+```
+
+Ventana solicitada: **2–7 de marzo de 2026** (histórica), filtrada a inglés:
+
+```
+20260303T183000Z | newsweek.com      | English | Federal Reserve Hit With Issues...
+20260305T091500Z | finance.yahoo.com | English | Kraken Gains Fed Access...
+20260304T203000Z | livemint.com      | English | Kevin Warsh to replace Jerome Powell...
+```
+
+| Criterio | Resultado |
+|---|---|
+| OP-1/OP-2 — rango de fechas | ✅ la ventana histórica se recuperó correctamente |
+| §1.2 — archivo histórico | ✅ marzo de 2026 disponible en septiembre |
+| Filtrado por idioma y país | ✅ `sourcelang:`, más campos `language` y `sourcecountry` |
+| Identificación de fuente | ✅ `domain` permite asignar tier |
+| Licencia | ✅ abierta; sólo indexa metadatos y enlaza al original |
+| Rate limit | ⚠️ intermitente: la cuota se comparte con la IP de salida |
+
+**Campos:** `url`, `url_mobile`, `title`, `seendate`, `socialimage`, `domain`,
+`language`, `sourcecountry`.
+
+#### El matiz que importa: `seendate` no es `published_at` 🔴
+
+Los valores llegan redondeados a 15 minutos (`183000Z`, `091500Z`, `203000Z`).
+Es **cuándo GDELT vio el artículo**, no cuándo se publicó.
+
+Para **OP-6** esto significa que `seendate` es un **proxy de `available_at`,
+ligeramente posterior al real**, con granularidad de 15 minutos. Es
+**suficiente** para eventos cuyo efecto se mide a 1d/7d/30d, e **insuficiente**
+para un análisis intradía fino. Debe almacenarse marcándolo como tal, nunca
+como si fuera el instante de publicación.
+
+Comparado con SEC EDGAR (ADR 006), cuyo `acceptanceDateTime` tiene precisión de
+milisegundo y significado inequívoco, GDELT es una fuente **complementaria y de
+menor precisión temporal**, no sustitutiva.
+
+#### Observación útil
+
+Entre los dominios indexados aparece `finance.yahoo.com`. **GDELT da acceso
+indirecto al contenido que Yahoo bloquea directamente** — metadatos y enlace,
+no el cuerpo, pero suficiente para detectar el evento.
 
 ---
 
@@ -462,17 +509,25 @@ con otros usuarios de la misma IP de salida. Misma conclusión que Yahoo.
 | **§1.2** | Archivo histórico de eventos | ✅ **RESUELTO** — 11 años en una llamada | **SEC EDGAR** (ADR 006) |
 | **NR-4** | Licencia de almacenamiento | ✅ **RESUELTO** — dominio público | **SEC EDGAR** (ADR 006) |
 | **EX-1** | Sorpresa de earnings | ✅ **RESUELTO** | Twelve Data (ADR 002) |
-| **MA-1** | Historial de revisiones macro | ⏸️ **sólo falta la API key** — host alcanzable, error confirmado | FRED/ALFRED |
-| **MA-2** | `release_timestamp` macro | ⏸️ **sólo falta la API key** | FRED/ALFRED |
+| **MA-1** | Historial de revisiones macro | ✅ **RESUELTO** — 4 vintages del mismo trimestre | **FRED/ALFRED** (ADR 007) |
+| **MA-2** | `release_timestamp` macro | ✅ **RESUELTO** — `realtime_start`/`realtime_end` | **FRED/ALFRED** (ADR 007) |
+| **§1.2b** | Archivo de **noticias generales** | ✅ **RESUELTO** — ventana histórica recuperada | **GDELT** (viable con reintentos) |
 | **EX-4** | Consenso *as-of* | ⚠️ resoluble **hacia adelante** vía captura diaria (§1.4) | Twelve Data + job diario |
 | **EX-2** | `consensus_available_at` | 🔴 gap abierto | — |
 | **PR-4** | Sin ajuste retroactivo | ⚠️ indicios favorables, **verificación pendiente** | Twelve Data |
-| **§1.2b** | Archivo de **noticias generales** (no filings) | 🔴 **SIN RESOLVER** — Yahoo y GDELT inviables por rate limiting de IP | ninguno |
 
-**Resumen del cambio:** de 8 bloqueantes, **4 quedan resueltos con evidencia** y 2
-más dependen únicamente de una credencial gratuita. El único que sigue sin vía
-identificada es el archivo de noticias generales — pero los **eventos corporativos
-Tier 1 ya tienen fuente**, que es lo que desbloquea la capa 1.
+**Resumen:** de 10 bloqueantes, **7 resueltos con evidencia real** en `/fixtures`.
+Los tres restantes son gaps acotados y documentados, ninguno impide FASE 2.
+
+**FASE 1 queda cerrada.** La capa de datos permite backtesting válido:
+
+| Capa | Fuente | Bloqueante que cierra |
+|---|---|---|
+| Eventos corporativos Tier 1 | SEC EDGAR (ADR 006) | OP-6, §1.2, NR-4 |
+| Régimen macro sin look-ahead | FRED/ALFRED (ADR 007) | **MA-1, MA-2** |
+| Noticias generales | GDELT | §1.2b |
+| Precios | Twelve Data (ADR 001) | PR-1, PR-2 |
+| Sorpresa de earnings | Twelve Data (ADR 002) | EX-1 |
 
 ---
 
