@@ -1,0 +1,33 @@
+{
+ "_fixture": "Muestra del GKG de GDELT (archivo 20260915180000.gkg.csv, ventana de 15 min). Descargado de data.gdeltproject.org el 2026-09-15 via HTTPS.",
+ "_nota_https": "lastupdate.txt devuelve URLs con esquema http://, que el proxy rechaza. Hay que reescribirlas a https://.",
+ "registros_en_ventana_15min": 1607,
+ "columnas": 27,
+ "V2Tone_campos": "Tone, PositiveScore, NegativeScore, Polarity, ActivityRefDensity, SelfGroupRefDensity, WordCount",
+ "muestra": [
+  {
+   "GKGRECORDID": "20260915180000-0",
+   "DATE": "20260915180000",
+   "SourceName": "offbeat.com",
+   "DocumentId": "https://www.offbeat.com/news/benefit-concert-for-wendell-brunious-set-for-oct-20-at-snug-harbor/",
+   "V2Themes": "",
+   "V2Tone": "5.92255125284738,6.83371298405467,0.911161731207289,7.74487471526196,20.7289293849658,1.13895216400911,393"
+  },
+  {
+   "GKGRECORDID": "20260915180000-1",
+   "DATE": "20260915180000",
+   "SourceName": "whittierdailynews.com",
+   "DocumentId": "https://www.whittierdailynews.com/2026/09/15/first-look-inside-new-unearthed-maze-at-knotts-scary-fa",
+   "V2Themes": "CRISISLEX_O02_RESPONSEAGENCIESATCRISIS;EMERG_DISTRESSSIGNAL;ARMEDCONFLICT;AGRICULTURE;CRISISLEX_T11_UPDATESSYMPATHY;TAX_",
+   "V2Tone": "-5.57202133965619,1.9561351511559,7.52815649081209,9.48429164196799,24.4813278008299,0.948429164196799,1610"
+  },
+  {
+   "GKGRECORDID": "20260915180000-2",
+   "DATE": "20260915180000",
+   "SourceName": "taylorvilledailynews.com",
+   "DocumentId": "https://www.taylorvilledailynews.com/maduro-ally-alex-saab-pleads-guilty-in-federal-money-laundering",
+   "V2Themes": "TAX_ETHNICITY;TAX_ETHNICITY_VENEZUELAN;LEADER;TAX_FNCACT;TAX_FNCACT_PRESIDENT;USPEC_POLITICS_GENERAL1;TRIAL;CORRUPTION;E",
+   "V2Tone": "-5.71428571428571,2.53968253968254,8.25396825396825,10.7936507936508,20.3174603174603,0.158730158730159,573"
+  }
+ ]
+}
