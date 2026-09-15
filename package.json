@@ -9,6 +9,7 @@
   },
   "scripts": {
     "db:migrate": "node scripts/migrate.mjs",
+    "portfolio": "node --experimental-strip-types scripts/portfolio.ts",
     "test": "node --test --experimental-strip-types tests/*.test.ts"
   },
   "dependencies": {
