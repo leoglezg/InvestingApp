@@ -29,8 +29,9 @@ sí consumen datos de negocio y siguen bloqueadas.
 
 ## 1. LO DESPLEGADO
 
-Esquema `market`, 13 tablas. Sustituye por completo al auditado, que usaba sintaxis
-MySQL de índices y **nunca llegó a ejecutarse** (AUDIT.md §3 C-1).
+Esquema `market`, **14 tablas** (verificado contra `information_schema`). Sustituye
+por completo al auditado, que usaba sintaxis MySQL de índices y **nunca llegó a
+ejecutarse** (AUDIT.md §3 C-1).
 
 | Tabla | Capa | Ley que impone |
 |---|---|---|
@@ -127,11 +128,11 @@ ERROR: new row violates check constraint "ley6_available_after_event"
 
 ---
 
-## 3. TESTS AUTOMATIZADOS — 21/21 EN VERDE
+## 3. TESTS AUTOMATIZADOS — 56/56 EN VERDE
 
 ```
-# tests 21
-# pass 21
+# tests 56
+# pass 56
 # fail 0
 ```
 
@@ -160,6 +161,41 @@ Ejecutables con `npm test`, sin base de datos.
 - ✅ `validation_status: hypothesis` obliga a `last_validated_at: null`
 - ✅ Los filtros duros de sorpresa están activos
 - ✅ El umbral adaptativo es **más** exigente cuanto menor es la muestra
+
+### `tests/scoring.test.ts` — clasificación y validación (spec §4)
+
+Lógica pura, sin dependencia de proveedor. Es la capa 10 (validación), que en el
+código auditado **no existía**: había una tabla `learning_feedback` que ningún
+módulo escribía ni leía.
+
+**Clasificación de escenarios:**
+- ✅ Los límites exactos (±0.5σ) son `neutral`: la banda es cerrada, para que el
+  redondeo no cambie la clase
+- ✅ Las 3 clases son exhaustivas y excluyentes, barriendo el rango de retornos
+- ✅ Escala con σ — **el núcleo del diseño**: −1.5% es `bearish` en calma y
+  `neutral` en pánico
+- ✅ σ ≤ 0 lanza en vez de devolver un valor plausible
+
+**Brier multiclase:**
+- ✅ **Reproduce el ejemplo publicado en la spec: `0.1586`** para
+  `{0.68, 0.21, 0.11}` observando `bearish`
+- ✅ El predictor uniforme da exactamente `0.6667`, el baseline a batir
+- ✅ Predicción perfecta = 0; certeza en la clase equivocada = 2
+- ✅ Rechaza distribuciones que no suman 1 — el código auditado emitía 0.8 y 0.85
+
+**Honestidad estadística:**
+- ✅ Con `n=1` el intervalo es infinito y **no se afirma superioridad**
+- ✅ Con aciertos y fallos alternos, la media bate al baseline pero el IC lo
+  solapa → `beatsBaseline: false`. **La media sola engañaría; el IC lo impide**
+- ✅ Sólo se declara superioridad si el intervalo **entero** queda por debajo
+
+**Calibración y desglose:**
+- ✅ La curva detecta exceso de confianza (afirmar 0.9 acertando el 30%)
+- ✅ Accuracy direccional separada de la total, porque `neutral` no tiene signo
+- ✅ `breakdownBy` separa un régimen perfecto (Brier 0) de uno roto (Brier 2) que
+  **en agregado dan 1.0 sin indicar dónde falla** — que es justo lo que la spec
+  advierte: *"un modelo puede estar calibrado en agregado y roto en un régimen
+  específico"*
 
 ---
 

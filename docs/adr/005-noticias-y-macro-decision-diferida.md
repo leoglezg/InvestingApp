@@ -84,6 +84,41 @@ Se necesitan **dos capacidades distintas**, que pueden venir de proveedores dist
 | Candidato | Por qué | Qué verificar |
 |---|---|---|
 | FRED / ALFRED | ALFRED existe específicamente para series *vintage* | Que devuelva el valor **as-of** y no el revisado |
+
+> #### Actualización 2026-09-15 — evidencia documental sobre FRED/ALFRED
+>
+> La red sigue bloqueada (6/6 hosts rechazados; `WebFetch` también usa el mismo
+> proxy de egress). Pero la **búsqueda web sí funciona**, y permite reducir la
+> incertidumbre sobre si MA-1 es siquiera satisfacible.
+>
+> Según la documentación oficial, cada observación de FRED lleva tres fechas:
+> `date` (el periodo al que se refiere), `realtime_start` y `realtime_end` (el
+> intervalo en que ese valor estuvo vigente). Y el parámetro `output_type` admite:
+>
+> | valor | significado |
+> |---|---|
+> | `1` | Observations **by Real-Time Period** |
+> | `2` | Observations by Vintage Date, all observations |
+> | `3` | Observations by Vintage Date, **new and revised only** |
+> | `4` | Observations, **Initial Release Only** |
+>
+> Existe además el endpoint `fred/series/vintagedates`, que devuelve las fechas en
+> que una serie fue revisada.
+>
+> **Lectura:** `output_type=4` es literalmente **MA-1** (valor del release
+> inicial), y `output_type=1` es literalmente la semántica de `asOf(T)`. El
+> modelo `realtime_start`/`realtime_end` se corresponde uno a uno con la
+> bitemporalidad que ya impone `macro_observations`.
+>
+> **Estado: sigue `NO VERIFICADO` y el ADR sigue DIFERIDO.** Esto es
+> documentación, no una llamada real, y la spec es explícita en que la
+> documentación no cuenta como evidencia. Lo que cambia es el perfil de riesgo:
+> ya no es incierto *si existe* una fuente capaz de satisfacer el bloqueante más
+> duro, sólo falta poder alcanzarla y comprobarlo con respuestas crudas en
+> `/fixtures`.
+>
+> Fuente: [FRED API — series/observations](https://fred.stlouisfed.org/docs/api/fred/series_observations.html) ·
+> [ALFRED — Download Data Help](https://alfred.stlouisfed.org/help/downloaddata)
 | Fuentes primarias (BLS, BEA, Fed H.15) | Origen del dato; calendarios oficiales | Precisión de `release_timestamp` |
 | Comerciales de macro | Cobertura integrada | Costo; licencia |
 
