@@ -1,0 +1,129 @@
+{
+ "_fixture": "Respuesta real de data.sec.gov/submissions/CIK0000320193.json capturada 2026-09-15. Extracto: los 12 filings 8-K mas recientes. El original trae 1000 filings cubriendo 2015-07-24 a 2026-09-10.",
+ "cik": "0000320193",
+ "name": "Apple Inc.",
+ "tickers": [
+  "AAPL"
+ ],
+ "total_filings_en_pagina": 1000,
+ "rango_fechas": [
+  "2015-07-24",
+  "2026-09-10"
+ ],
+ "campos_disponibles": [
+  "accessionNumber",
+  "filingDate",
+  "reportDate",
+  "acceptanceDateTime",
+  "act",
+  "form",
+  "fileNumber",
+  "filmNumber",
+  "items",
+  "core_type",
+  "size",
+  "isXBRL",
+  "isInlineXBRL",
+  "isXBRLNumeric",
+  "primaryDocument",
+  "primaryDocDescription"
+ ],
+ "filings_8K": [
+  {
+   "accessionNumber": "0001140361-26-035325",
+   "form": "8-K/A",
+   "filingDate": "2026-09-01",
+   "reportDate": "2026-04-17",
+   "acceptanceDateTime": "2026-09-01T20:30:35.000Z",
+   "items": "5.02"
+  },
+  {
+   "accessionNumber": "0000320193-26-000018",
+   "form": "8-K",
+   "filingDate": "2026-07-30",
+   "reportDate": "2026-07-30",
+   "acceptanceDateTime": "2026-07-30T20:30:28.000Z",
+   "items": "2.02,9.01"
+  },
+  {
+   "accessionNumber": "0000320193-26-000011",
+   "form": "8-K",
+   "filingDate": "2026-04-30",
+   "reportDate": "2026-04-30",
+   "acceptanceDateTime": "2026-04-30T20:30:41.000Z",
+   "items": "2.02,9.01"
+  },
+  {
+   "accessionNumber": "0001140361-26-015711",
+   "form": "8-K",
+   "filingDate": "2026-04-20",
+   "reportDate": "2026-04-17",
+   "acceptanceDateTime": "2026-04-20T21:29:51.000Z",
+   "items": "5.02"
+  },
+  {
+   "accessionNumber": "0001140361-26-006577",
+   "form": "8-K",
+   "filingDate": "2026-02-24",
+   "reportDate": "2026-02-24",
+   "acceptanceDateTime": "2026-02-24T21:55:58.000Z",
+   "items": "5.07,9.01"
+  },
+  {
+   "accessionNumber": "0000320193-26-000005",
+   "form": "8-K",
+   "filingDate": "2026-01-29",
+   "reportDate": "2026-01-29",
+   "acceptanceDateTime": "2026-01-29T21:30:33.000Z",
+   "items": "2.02,9.01"
+  },
+  {
+   "accessionNumber": "0001140361-26-000199",
+   "form": "8-K",
+   "filingDate": "2026-01-02",
+   "reportDate": "2025-12-30",
+   "acceptanceDateTime": "2026-01-02T21:30:52.000Z",
+   "items": "5.02"
+  },
+  {
+   "accessionNumber": "0001140361-25-044561",
+   "form": "8-K",
+   "filingDate": "2025-12-05",
+   "reportDate": "2025-12-04",
+   "acceptanceDateTime": "2025-12-05T21:31:42.000Z",
+   "items": "5.02"
+  },
+  {
+   "accessionNumber": "0000320193-25-000077",
+   "form": "8-K",
+   "filingDate": "2025-10-30",
+   "reportDate": "2025-10-30",
+   "acceptanceDateTime": "2025-10-30T20:30:35.000Z",
+   "items": "2.02,9.01"
+  },
+  {
+   "accessionNumber": "0000320193-25-000071",
+   "form": "8-K",
+   "filingDate": "2025-07-31",
+   "reportDate": "2025-07-31",
+   "acceptanceDateTime": "2025-07-31T20:30:25.000Z",
+   "items": "2.02,9.01"
+  },
+  {
+   "accessionNumber": "0001140361-25-027340",
+   "form": "8-K",
+   "filingDate": "2025-07-25",
+   "reportDate": "2025-07-21",
+   "acceptanceDateTime": "2025-07-25T20:30:49.000Z",
+   "items": "5.02"
+  },
+  {
+   "accessionNumber": "0001140361-25-025275",
+   "form": "8-K",
+   "filingDate": "2025-07-09",
+   "reportDate": "2025-07-08",
+   "acceptanceDateTime": "2025-07-09T01:18:13.000Z",
+   "items": "5.02"
+  }
+ ]
+}

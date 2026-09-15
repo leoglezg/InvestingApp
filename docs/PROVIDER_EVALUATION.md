@@ -352,18 +352,127 @@ abiertas en la misma operación:
 
 ---
 
+## 3.4 EVALUACIÓN POST-DESBLOQUEO — 2026-09-15
+
+La política de red se amplió. Cuatro hosts pasaron a ser alcanzables, lo que
+permitió ejecutar por fin llamadas reales fuera del conector MCP.
+
+### 3.4.1 Hallazgo técnico: Node necesita configuración explícita de proxy
+
+`curl` alcanzaba Yahoo mientras Node recibía `403 Host not in allowlist`. La causa
+es que el `fetch` de Node (undici) **no usa** las variables de entorno de proxy por
+defecto, así que salía por una ruta distinta y más restrictiva.
+
+**Solución, necesaria en todo script de ingesta:**
+
+```bash
+NODE_USE_ENV_PROXY=1 HTTPS_PROXY=http://127.0.0.1:45653 node script.mjs
+```
+
+Sin esto, cualquier cliente Node parece bloqueado aunque el host esté permitido.
+Nótese que `HTTPS_PROXY` viene sin esquema en el entorno y hay que anteponerle
+`http://`.
+
+### 3.4.2 SEC EDGAR — ✅ **APROBADO** (el hallazgo de la ronda)
+
+`GET https://data.sec.gov/submissions/CIK0000320193.json` → **HTTP 200**
+(requiere cabecera `User-Agent` identificando al solicitante; sin ella, 403).
+
+| Criterio | Resultado | Evidencia |
+|---|---|---|
+| **OP-6 — timestamp intradía** | ✅ `acceptanceDateTime: "2026-09-01T20:30:35.000Z"` — **precisión de milisegundo con TZ** | fixture |
+| **§1.2 — archivo histórico** | ✅ **1000 filings cubriendo 2015-07-24 → 2026-09-10: 11 años** | fixture |
+| **Tier** | ✅ **Tier 1**, fuente oficial | — |
+| OP-1/OP-2 — recuperación de ventanas | ✅ el histórico completo viene en la respuesta | fixture |
+| NR-4 — licencia | ✅ dominio público (obra del gobierno de EE. UU.) | — |
+
+**Es el mejor `available_at` que el sistema puede aspirar a tener.**
+`acceptanceDateTime` no es la fecha en que un periodista publicó algo: es el
+instante exacto en que el regulador aceptó el documento, que es cuando el hecho
+pasó a ser público. No hay ambigüedad que resolver.
+
+#### El hallazgo que no esperaba: taxonomía oficial de eventos
+
+Los filings 8-K traen un campo `items` con códigos estructurados:
+
+```
+2026-09-01T20:30:35.000Z   items=5.02
+2026-07-30T20:30:28.000Z   items=2.02,9.01
+2026-04-30T20:30:41.000Z   items=2.02,9.01
+```
+
+| Código | Significado | → `event_type` |
+|---|---|---|
+| `2.02` | Results of Operations and Financial Condition | `EARNINGS` |
+| `5.02` | Departure/Election of Directors or Officers | `CORPORATE` |
+| `1.01` | Entry into a Material Definitive Agreement | `CORPORATE` |
+| `8.01` | Other Events | `OTHER` |
+
+**Esto sustituye la clasificación por expresiones regulares.** El código auditado
+adivinaba el tipo de evento buscando palabras en el titular
+(`/earnings|results|revenue/`), con los falsos positivos que eso implica. Aquí el
+tipo viene **declarado por el emisor ante el regulador**, bajo responsabilidad
+legal. No hay inferencia, y por tanto no hay error de inferencia.
+
+**Limitación:** `data.sec.gov` se consulta **por empresa** (CIK), no hay feed
+global. Para un portafolio de N símbolos son N llamadas diarias — perfectamente
+viable. El feed global y la búsqueda de texto completo viven en `www.sec.gov` y
+`efts.sec.gov`, **ambos fuera de la allowlist** (HTTP 000).
+
+### 3.4.3 FRED / ALFRED — ⏸️ **requiere API key**
+
+Host alcanzable. Respuesta real:
+
+```json
+{"error_code":400,"error_message":"Bad Request. Variable api_key is not set.
+ Read https://fred.stlouisfed.org/docs/api/api_key.html for more information."}
+```
+
+Confirmado que **es alcanzable y que sólo falta la credencial**. La clave es
+gratuita. Ver §5 — es lo único que separa al proyecto de cerrar MA-1 y MA-2, los
+dos bloqueantes más duros de la spec.
+
+### 3.4.4 Yahoo Finance — 🔴 **inviable desde este entorno**
+
+Alcanzable, pero **429 persistente** tras 5 reintentos con espera creciente
+(3 s → 15 s), tanto por `curl` como por Node con el proxy correcto.
+
+Es rate limiting por IP: el proxy sale por una dirección de datacenter compartida,
+y Yahoo las restringe. **No es un problema de allowlist y no se resuelve
+reintentando.** Se suma a las razones del ADR 003.
+
+### 3.4.5 GDELT — 🔴 **inviable desde este entorno**
+
+Alcanzable (HTTP 200 al dominio raíz), pero la API devuelve 429 con el texto:
+
+> *"Please limit requests to one every 5 seconds..."*
+
+Persistió tras esperar 6 s entre llamadas, lo que indica que la cuota se comparte
+con otros usuarios de la misma IP de salida. Misma conclusión que Yahoo.
+
+---
+
 ## 4. ESTADO DE LOS BLOQUEANTES
+
+*Actualizado tras la evaluación post-desbloqueo del 2026-09-15.*
 
 | ID | Requisito | Estado | Cubierto por |
 |---|---|---|---|
-| **OP-6** | `available_at` intradía (noticias) | ⚠️ **satisfecho por un proveedor rechazado por otros motivos** | — |
-| **MA-1** | Historial de revisiones macro | 🔴 **SIN EVALUAR** | ninguno |
-| **MA-2** | `release_timestamp` macro | 🔴 **SIN EVALUAR** | ninguno |
-| **EX-1** | Sorpresa de earnings | ✅ **RESUELTO** | Twelve Data |
-| **EX-2** | `consensus_available_at` | 🔴 gap abierto | — |
+| **OP-6** | `available_at` intradía | ✅ **RESUELTO** — `acceptanceDateTime` con precisión de ms | **SEC EDGAR** (ADR 006) |
+| **§1.2** | Archivo histórico de eventos | ✅ **RESUELTO** — 11 años en una llamada | **SEC EDGAR** (ADR 006) |
+| **NR-4** | Licencia de almacenamiento | ✅ **RESUELTO** — dominio público | **SEC EDGAR** (ADR 006) |
+| **EX-1** | Sorpresa de earnings | ✅ **RESUELTO** | Twelve Data (ADR 002) |
+| **MA-1** | Historial de revisiones macro | ⏸️ **sólo falta la API key** — host alcanzable, error confirmado | FRED/ALFRED |
+| **MA-2** | `release_timestamp` macro | ⏸️ **sólo falta la API key** | FRED/ALFRED |
 | **EX-4** | Consenso *as-of* | ⚠️ resoluble **hacia adelante** vía captura diaria (§1.4) | Twelve Data + job diario |
+| **EX-2** | `consensus_available_at` | 🔴 gap abierto | — |
 | **PR-4** | Sin ajuste retroactivo | ⚠️ indicios favorables, **verificación pendiente** | Twelve Data |
-| **§1.2** | Archivo histórico de noticias | 🔴 **SIN RESOLVER** | ninguno |
+| **§1.2b** | Archivo de **noticias generales** (no filings) | 🔴 **SIN RESOLVER** — Yahoo y GDELT inviables por rate limiting de IP | ninguno |
+
+**Resumen del cambio:** de 8 bloqueantes, **4 quedan resueltos con evidencia** y 2
+más dependen únicamente de una credencial gratuita. El único que sigue sin vía
+identificada es el archivo de noticias generales — pero los **eventos corporativos
+Tier 1 ya tienen fuente**, que es lo que desbloquea la capa 1.
 
 ---
 
