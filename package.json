@@ -11,7 +11,8 @@
     "db:migrate": "node scripts/migrate.mjs",
     "portfolio": "node --experimental-strip-types scripts/portfolio.ts",
     "test": "node --test --experimental-strip-types tests/*.test.ts",
-    "verify:real": "node --experimental-strip-types scripts/verify-real.ts"
+    "verify:real": "node --experimental-strip-types scripts/verify-real.ts",
+    "dev": "node --experimental-strip-types scripts/dev-server.ts"
   },
   "dependencies": {
     "pg": "^8.13.1"
