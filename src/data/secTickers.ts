@@ -99,8 +99,17 @@ export interface ResolvedSymbol {
   symbol: string;
   cik: string | null;
   displayName: string | null;
-  /** true si no está en el catálogo: normal para ETF y fondos. */
-  isNonFiler: boolean;
+  /**
+   * true si no figura en el registro de emisores de la SEC.
+   *
+   * CUIDADO CON LA INTERPRETACIÓN: esto significa exactamente eso y nada más.
+   * NO permite concluir que el símbolo sea un ETF, ni que exista siquiera.
+   * Un ticker mal escrito produce el mismo resultado que un ETF legítimo.
+   *
+   * Para distinguirlos hace falta consultar un proveedor de mercado, que es
+   * lo que hace `describeResolution` cuando se le da esa información.
+   */
+  notInSecRegistry: boolean;
 }
 
 export function resolveSymbol(
@@ -110,6 +119,60 @@ export function resolveSymbol(
   const s = symbol.toUpperCase();
   const hit = catalog[s];
   return hit
-    ? { symbol: s, cik: hit.cik, displayName: hit.title, isNonFiler: false }
-    : { symbol: s, cik: null, displayName: null, isNonFiler: true };
+    ? { symbol: s, cik: hit.cik, displayName: hit.title, notInSecRegistry: false }
+    : { symbol: s, cik: null, displayName: null, notInSecRegistry: true };
+}
+
+/** Qué se sabe del símbolo en el proveedor de mercado, si se consultó. */
+export interface MarketLookup {
+  exists: boolean;
+  instrumentType?: string | null;
+  instrumentName?: string | null;
+}
+
+export type ResolutionVerdict =
+  | 'issuer'          // emisor con filings propios
+  | 'non_filer'       // existe en mercado, pero no presenta filings (ETF, fondo)
+  | 'unknown_symbol'  // no existe en ninguna parte: probablemente mal escrito
+  | 'unverified';     // no está en la SEC y no se pudo comprobar en mercado
+
+/**
+ * Traduce la resolución a un veredicto que no afirme de más.
+ *
+ * Sin consultar el mercado, lo máximo honesto que puede decirse de un símbolo
+ * ausente del registro de la SEC es «no lo sé»: podría ser un ETF o podría
+ * ser una errata. Decir «es un ETF» sin comprobarlo convierte el error de
+ * tecleo del usuario en una afirmación falsa del sistema.
+ */
+export function describeResolution(
+  r: ResolvedSymbol,
+  market?: MarketLookup
+): { verdict: ResolutionVerdict; message: string } {
+  if (!r.notInSecRegistry) {
+    return { verdict: 'issuer', message: `emisor registrado (CIK ${r.cik})` };
+  }
+
+  if (!market) {
+    return {
+      verdict: 'unverified',
+      message:
+        'no figura en el registro de emisores de la SEC. Puede ser un ETF o ' +
+        'fondo (que no presentan filings propios) o un símbolo mal escrito: ' +
+        'sin consultar un proveedor de mercado no se puede distinguir',
+    };
+  }
+
+  if (!market.exists) {
+    return {
+      verdict: 'unknown_symbol',
+      message: 'no existe en el proveedor de mercado ni en el registro de la SEC: revisa el símbolo',
+    };
+  }
+
+  const tipo = market.instrumentType ?? 'instrumento';
+  const nombre = market.instrumentName ? ` — ${market.instrumentName}` : '';
+  return {
+    verdict: 'non_filer',
+    message: `${tipo} sin filings propios${nombre}; el análisis se apoya en precios, macro y noticias`,
+  };
 }

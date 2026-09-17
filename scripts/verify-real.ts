@@ -18,8 +18,8 @@
  * No toca la base de datos: sólo lee de las fuentes y reporta.
  */
 
-import { loadSecTickers, resolveSymbol } from '../src/data/secTickers.ts';
-import { fetchSecFilings, type SecFiling } from '../src/ingest/sources.ts';
+import { loadSecTickers, resolveSymbol, describeResolution } from '../src/data/secTickers.ts';
+import { fetchSecFilings, EVENT_FORMS, type SecFiling } from '../src/ingest/sources.ts';
 import {
   clusterCandidates, assessVerification, summarizeDedup,
   DEFAULT_DEDUP_CONFIG, type DedupCandidate,
@@ -55,8 +55,11 @@ for (const symbol of symbols) {
   const resolved = resolveSymbol(symbol, catalog);
 
   if (!resolved.cik) {
-    // No es un fallo: los ETF no presentan filings propios.
-    console.log(`  ${symbol.padEnd(6)} sin CIK — no es emisor (${resolved.isNonFiler ? 'ETF o fondo' : '?'}); se omite la capa SEC\n`);
+    // Ausente del registro de emisores. NO se afirma que sea un ETF: un
+    // símbolo mal escrito produce exactamente el mismo resultado, y sin
+    // consultar un proveedor de mercado no hay forma de distinguirlos.
+    const { message } = describeResolution(resolved);
+    console.log(`  ${symbol.padEnd(6)} ${message}\n`);
     continue;
   }
 
@@ -86,7 +89,15 @@ for (const symbol of symbols) {
 
   const nombre = (resolved.displayName ?? '').slice(0, 28);
   console.log(`  ${symbol.padEnd(6)} ${nombre.padEnd(30)} CIK ${resolved.cik}`);
-  console.log(`         ${s.inputCount} documentos → ${s.eventCount} eventos  (${s.mergedCount} fusionados)`);
+  if (s.inputCount === 0) {
+    // Emisor registrado que no presenta formularios de evento. Le pasa a los
+    // trusts de ETF: existen ante el regulador pero no publican 8-K ni 10-Q.
+    // Distinto de "no ha ocurrido nada", y conviene no confundirlos.
+    console.log(`         sin formularios de evento en la ventana (${EVENT_FORMS.join(', ')})`);
+    console.log(`         registrado ante la SEC, pero no publica este tipo de documentos`);
+  } else {
+    console.log(`         ${s.inputCount} documentos → ${s.eventCount} eventos  (${s.mergedCount} fusionados)`);
+  }
 
   for (const c of clusters.filter(x => x.members.length > 1)) {
     const v = assessVerification(c);

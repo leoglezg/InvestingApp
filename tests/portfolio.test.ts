@@ -168,12 +168,12 @@ describe('resolveSymbol', () => {
   test('resuelve un emisor conocido', () => {
     const r = resolveSymbol('aapl', catalog);
     assert.equal(r.cik, '320193');
-    assert.equal(r.isNonFiler, false);
+    assert.equal(r.notInSecRegistry, false);
   });
 
   test('un símbolo ausente se marca como no-emisor, sin lanzar', () => {
     const r = resolveSymbol('QQQM', catalog);
     assert.equal(r.cik, null);
-    assert.equal(r.isNonFiler, true);
+    assert.equal(r.notInSecRegistry, true);
   });
 });

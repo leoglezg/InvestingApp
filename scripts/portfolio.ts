@@ -16,7 +16,7 @@
  */
 
 import pg from 'pg';
-import { loadSecTickers, resolveSymbol } from '../src/data/secTickers.ts';
+import { loadSecTickers, resolveSymbol, describeResolution } from '../src/data/secTickers.ts';
 import {
   normalizeSymbol, validateQuantity, computeWeights, analysisCapabilities,
   type AssetType, type PositionSource,
@@ -179,11 +179,13 @@ async function ensureSymbol(symbol: string): Promise<void> {
     const catalog = await loadSecTickers({ userAgent: UA });
     const r = resolveSymbol(symbol, catalog);
     cik = r.cik; displayName = r.displayName;
-    if (r.isNonFiler) {
-      assetType = 'etf';
-      console.log(`\n  ${symbol} no figura como emisor en la SEC.`);
-      console.log('  Es lo esperable en un ETF o fondo: se registra sin CIK y su');
-      console.log('  análisis se apoyará en precios, macro y noticias generales.');
+    if (r.notInSecRegistry) {
+      // No se marca como 'etf': sin consultar un proveedor de mercado no se
+      // puede saber si es un fondo legítimo o un símbolo mal escrito.
+      assetType = 'other';
+      const { message } = describeResolution(r);
+      console.log(`\n  ${symbol}: ${message}.`);
+      console.log('  Se registra sin CIK. Si esperabas una acción, revisa el símbolo.');
     }
   } catch (e) {
     console.log(`\n  ⚠ No se pudo consultar el catálogo de la SEC (${(e as Error).message}).`);
