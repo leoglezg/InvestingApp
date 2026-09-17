@@ -15,6 +15,7 @@
  */
 
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
+import { readFileSync } from 'node:fs';
 import pg from 'pg';
 
 import { computeWeights } from '../src/portfolio/positions.ts';
@@ -393,11 +394,63 @@ const server = createServer(async (req: IncomingMessage, res: ServerResponse) =>
   }
 });
 
+/**
+ * Diagnóstico de por qué faltan variables cuando el .env sí existe.
+ *
+ * Dos causas reales, ambas difíciles de ver a simple vista:
+ *
+ *  - El archivo empieza por una marca de orden de bytes (BOM). PowerShell la
+ *    añade con `Out-File -Encoding utf8`, es invisible al abrirlo, y hace que
+ *    Node lea la PRIMERA clave como «﻿CLAVE»: esa variable se pierde y
+ *    las demás cargan bien, que es justo lo que despista.
+ *  - El archivo no se está cargando en absoluto (falta --env-file).
+ */
+function diagnosticarEnv(): string[] {
+  const avisos: string[] = [];
+  let contenido: Buffer;
+  try {
+    contenido = readFileSync('.env');
+  } catch {
+    avisos.push('No se encontró .env en esta carpeta. Créalo junto a package.json.');
+    return avisos;
+  }
+
+  if (contenido[0] === 0xef && contenido[1] === 0xbb && contenido[2] === 0xbf) {
+    avisos.push(
+      'El .env empieza por una marca invisible (BOM) que Node no admite: la ' +
+      'PRIMERA línea del archivo se pierde. Para quitarla:'
+    );
+    avisos.push('    $c = Get-Content .env');
+    avisos.push('    [System.IO.File]::WriteAllLines("$PWD\\.env", $c)');
+    return avisos;
+  }
+
+  const claves = contenido.toString('utf8').split('\n')
+    .map(l => l.trim()).filter(l => l && !l.startsWith('#'))
+    .map(l => l.split('=')[0]);
+  if (claves.length > 0) {
+    avisos.push(
+      `El .env tiene ${claves.length} variable(s) (${claves.join(', ')}) pero no ` +
+      'llegaron al proceso. Arranca con "npm run dev", que las carga.'
+    );
+  }
+  return avisos;
+}
+
 // Sólo localhost: la interfaz permite modificar la cartera.
 server.listen(PORT, '127.0.0.1', () => {
   console.log(`\n  InvestingApp — interfaz de pruebas`);
   console.log(`  http://localhost:${PORT}\n`);
-  if (!DB) console.log('  ⚠ DATABASE_URL no configurada: la cartera no cargará.');
-  if (!UA) console.log('  ⚠ SEC_USER_AGENT no configurada: la SEC responderá 403.');
+
+  const faltan: string[] = [];
+  if (!DB) faltan.push('DATABASE_URL');
+  if (!UA) faltan.push('SEC_USER_AGENT');
+
+  if (faltan.length) {
+    console.log(`  ⚠ Falta(n): ${faltan.join(', ')}`);
+    for (const a of diagnosticarEnv()) console.log(`    ${a}`);
+  } else {
+    console.log('  ✓ Credenciales cargadas.');
+  }
   console.log('');
 });

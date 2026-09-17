@@ -8,11 +8,11 @@
     "node": ">=22"
   },
   "scripts": {
-    "db:migrate": "node scripts/migrate.mjs",
-    "portfolio": "node --experimental-strip-types scripts/portfolio.ts",
+    "db:migrate": "node --env-file-if-exists=.env scripts/migrate.mjs",
+    "portfolio": "node --env-file-if-exists=.env --experimental-strip-types scripts/portfolio.ts",
     "test": "node --test --experimental-strip-types tests/*.test.ts",
-    "verify:real": "node --experimental-strip-types scripts/verify-real.ts",
-    "dev": "node --experimental-strip-types scripts/dev-server.ts"
+    "verify:real": "node --env-file-if-exists=.env --experimental-strip-types scripts/verify-real.ts",
+    "dev": "node --env-file-if-exists=.env --experimental-strip-types scripts/dev-server.ts"
   },
   "dependencies": {
     "pg": "^8.13.1"
