@@ -78,6 +78,10 @@
 
 <section>
   <h2>Cartera</h2>
+  <div class="row" style="margin-bottom:11px">
+    <button id="btnPx" onclick="refrescarPrecios()">Actualizar precios</button>
+    <span id="pxres" class="sm mut"></span>
+  </div>
   <div id="pf" class="mut sm">—</div>
 </section>
 
@@ -139,7 +143,7 @@ function sinServidor(msg) {
 npm install
 npm run dev</pre>
     <p class="sm mut" style="margin:9px 0 0">Necesita un <code>.env</code> con
-    <code>DATABASE_URL</code>, <code>SEC_USER_AGENT</code> y <code>FRED_API_KEY</code>.</p>
+    <code>DATABASE_URL</code>, <code>SEC_USER_AGENT</code>, <code>FRED_API_KEY</code> y <code>TWELVEDATA_API_KEY</code>.</p>
   </div>`;
 }
 
@@ -154,7 +158,7 @@ async function conectar() {
     $('connState').innerHTML = '<span class="ok">conectado</span>';
     $('banner').innerHTML = '';
     $('health').innerHTML = '<table style="margin-top:10px">' + Object.entries(h).map(([k, v]) => {
-      const malo = String(v).includes('ERROR') || String(v) === 'FALTA' || String(v) === 'sin configurar';
+      const malo = /ERROR|FALTA|sin configurar/.test(String(v));
       return `<tr><td class="mut sm" style="width:150px">${esc(k)}</td>
         <td class="sm ${malo ? 'warn' : 'ok'}">${esc(v)}</td></tr>`;
     }).join('') + '</table>';
@@ -241,13 +245,32 @@ async function guardar() {
       method: 'POST', headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ symbol: s, quantity: q }),
     });
+    const nota = r.priceNote
+      ? ` <span class="${/precio /.test(r.priceNote) ? 'mut' : 'warn'}">· ${esc(r.priceNote)}</span>`
+      : '';
     $('setres').innerHTML = `<p class="ok sm" style="margin:9px 0 0">Guardado:
-      <b>${esc(r.symbol)}</b> = ${num(r.quantity, 8)}</p>`;
+      <b>${esc(r.symbol)}</b> = ${num(r.quantity, 8)}${nota}</p>`;
     $('sym').value = ''; $('qty').value = '';
     cartera(); plan();
   } catch (e) {
     $('setres').innerHTML = `<p class="err sm" style="margin:9px 0 0">${esc(e.message)}</p>`;
   } finally { $('btnSet').disabled = false; }
+}
+
+async function refrescarPrecios() {
+  $('btnPx').disabled = true;
+  $('pxres').textContent = 'consultando…';
+  try {
+    const r = await api('/api/refresh-prices', { method: 'POST' });
+    const fallos = (r.failed || []).length;
+    $('pxres').innerHTML = `<span class="${fallos ? 'warn' : 'ok'}">`
+      + `${r.updated} de ${r.total} actualizados`
+      + (fallos ? ` · sin precio: ${esc(r.failed.map(f => f.symbol).join(', '))}` : '')
+      + '</span>';
+    cartera();
+  } catch (e) {
+    $('pxres').innerHTML = `<span class="err">${esc(e.message)}</span>`;
+  } finally { $('btnPx').disabled = false; }
 }
 
 async function verificar() {

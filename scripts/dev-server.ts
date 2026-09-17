@@ -24,6 +24,7 @@ import { loadSecTickers, resolveSymbol, describeResolution } from '../src/data/s
 import { fetchSecFilings, EVENT_FORMS, type SecFiling } from '../src/ingest/sources.ts';
 import { clusterCandidates, summarizeDedup, type DedupCandidate } from '../src/dedup/cluster.ts';
 import { planDailyIngest } from '../src/ingest/planner.ts';
+import { fetchQuote, fetchQuotes } from '../src/ingest/prices.ts';
 
 const PORT = Number(process.env.PORT ?? 3000);
 const DB = process.env.DATABASE_URL;
@@ -76,6 +77,7 @@ const routes: Record<string, (req: IncomingMessage, url: URL) => Promise<unknown
     const out: Record<string, unknown> = {
       db: 'sin configurar', secUserAgent: UA ? 'configurado' : 'FALTA',
       fredApiKey: process.env.FRED_API_KEY ? 'configurada' : 'FALTA',
+      twelveDataKey: process.env.TWELVEDATA_API_KEY ? 'configurada' : 'FALTA (sin ella no hay precios)',
     };
     if (pool) {
       try {
@@ -84,7 +86,12 @@ const routes: Record<string, (req: IncomingMessage, url: URL) => Promise<unknown
         );
         out.db = `conectada (${r[0].n} tablas)`;
       } catch (e) {
-        out.db = `ERROR: ${(e as Error).message}`;
+        // Un fallo de red al conectar puede llegar sin mensaje, y "ERROR:" a
+        // secas no le dice nada a nadie. Se completa con la causa o el código.
+        const err = e as Error & { code?: string };
+        const detalle = err.message?.trim() || err.code ||
+          'no se pudo conectar (revisa DATABASE_URL y tu conexión)';
+        out.db = `ERROR: ${detalle}`;
       }
     }
     return out;
@@ -187,6 +194,37 @@ const routes: Record<string, (req: IncomingMessage, url: URL) => Promise<unknown
     return { results };
   },
 
+  /**
+   * Refresca los precios de los símbolos seguidos.
+   *
+   * Los quotes son append-only: cada refresco añade una observación nueva con
+   * su propio instante, nunca sobrescribe la anterior. Así la cartera de ayer
+   * sigue valorándose con el precio de ayer.
+   */
+  'POST /api/refresh-prices': async () => {
+    const key = process.env.TWELVEDATA_API_KEY ?? '';
+    if (!key) throw new Error('Falta TWELVEDATA_API_KEY en el .env (obtén una gratis en twelvedata.com)');
+
+    const rows = await q<{ symbol: string }>('SELECT symbol FROM symbols WHERE is_tracked');
+    if (rows.length === 0) return { updated: 0, failed: [], message: 'No hay símbolos seguidos.' };
+
+    const results = await fetchQuotes(rows.map(r => r.symbol), key);
+    let updated = 0;
+    const failed: { symbol: string; error: string }[] = [];
+
+    for (const r of results) {
+      if (!r.quote) { failed.push({ symbol: r.symbol, error: r.error ?? 'desconocido' }); continue; }
+      await q(
+        `INSERT INTO market_quotes (symbol, price, quoted_at, available_at, is_market_open, provider)
+         VALUES ($1,$2,$3,$3,$4,'twelvedata')
+         ON CONFLICT (symbol, quoted_at, provider) DO NOTHING`,
+        [r.quote.symbol, r.quote.price, r.quote.quotedAt, r.quote.isMarketOpen]
+      );
+      updated++;
+    }
+    return { updated, failed, total: results.length };
+  },
+
   'POST /api/position': async (req) => {
     const body = await readBody(req);
     const symbol = normalizeSymbol(String(body.symbol ?? ''));
@@ -207,7 +245,28 @@ const routes: Record<string, (req: IncomingMessage, url: URL) => Promise<unknown
        VALUES ($1, $2, now(), 'manual', $3)`,
       [symbol, quantity, body.note ?? null]
     );
-    return { ok: true, symbol, quantity };
+
+    // Traer el precio en el acto: sin él la posición aparece sin valorar y el
+    // usuario no sabe si es que falta el dato o si algo falló. Un fallo aquí
+    // NO invalida la posición, que ya está registrada: se informa y punto.
+    let priceNote: string | null = null;
+    const key = process.env.TWELVEDATA_API_KEY ?? '';
+    if (quantity > 0) {
+      try {
+        const quote = await fetchQuote(symbol, key);
+        await q(
+          `INSERT INTO market_quotes (symbol, price, quoted_at, available_at, is_market_open, provider)
+           VALUES ($1,$2,$3,$3,$4,'twelvedata')
+           ON CONFLICT (symbol, quoted_at, provider) DO NOTHING`,
+          [quote.symbol, quote.price, quote.quotedAt, quote.isMarketOpen]
+        );
+        priceNote = `precio ${quote.price}`;
+      } catch (e) {
+        priceNote = (e as Error).message;
+      }
+    }
+
+    return { ok: true, symbol, quantity, priceNote };
   },
 };
 
