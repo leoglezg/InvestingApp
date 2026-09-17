@@ -1,0 +1,290 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>InvestingApp — pruebas</title>
+<style>
+  :root{
+    --bg:#fbfbfa; --panel:#ffffff; --fg:#1a1a18; --mut:#6f6f69;
+    --line:#e6e6e2; --acc:#2f5d50; --acc-fg:#ffffff;
+    --ok:#2f6b4f; --warn:#8a5a2b; --err:#9b3232;
+  }
+  @media (prefers-color-scheme:dark){
+    :root{
+      --bg:#141413; --panel:#1c1c1a; --fg:#ecebe6; --mut:#9b9b94;
+      --line:#2f2f2c; --acc:#7fb3a1; --acc-fg:#141413;
+      --ok:#7fb3a1; --warn:#d6a35c; --err:#e07a7a;
+    }
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--fg);
+    font:15px/1.55 ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;
+    padding:28px 16px;-webkit-font-smoothing:antialiased}
+  main{max-width:940px;margin:0 auto}
+  header{margin-bottom:22px}
+  h1{font-size:21px;margin:0 0 3px;letter-spacing:-.01em}
+  .sub{color:var(--mut);margin:0;font-size:13.5px}
+  section{background:var(--panel);border:1px solid var(--line);border-radius:10px;
+    padding:16px 18px;margin-bottom:14px}
+  h2{font-size:11.5px;text-transform:uppercase;letter-spacing:.07em;color:var(--mut);
+    margin:0 0 12px;font-weight:650}
+  table{width:100%;border-collapse:collapse;font-variant-numeric:tabular-nums}
+  th{text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:.05em;
+    color:var(--mut);padding:0 10px 7px 0;font-weight:650;white-space:nowrap}
+  td{padding:7px 10px 7px 0;border-top:1px solid var(--line);vertical-align:top}
+  .r{text-align:right} .mut{color:var(--mut)} .sm{font-size:12.5px}
+  .ok{color:var(--ok)} .warn{color:var(--warn)} .err{color:var(--err)}
+  button{background:var(--acc);color:var(--acc-fg);border:0;border-radius:7px;
+    padding:8px 15px;font:inherit;font-size:14px;font-weight:550;cursor:pointer}
+  button:hover{filter:brightness(1.08)} button:disabled{opacity:.5;cursor:default}
+  input{background:var(--bg);color:var(--fg);border:1px solid var(--line);
+    border-radius:7px;padding:8px 10px;font:inherit;font-size:14px}
+  input:focus{outline:2px solid var(--acc);outline-offset:-1px}
+  .row{display:flex;gap:9px;flex-wrap:wrap;align-items:center}
+  .tag{display:inline-block;font-size:10.5px;padding:2px 7px;border-radius:5px;
+    border:1px solid var(--line);color:var(--mut);white-space:nowrap}
+  .banner{border-radius:10px;padding:14px 16px;margin-bottom:14px;border:1px solid}
+  .banner.bad{border-color:var(--err);background:color-mix(in srgb,var(--err) 9%,var(--panel))}
+  .banner.good{border-color:var(--ok);background:color-mix(in srgb,var(--ok) 9%,var(--panel))}
+  code{font:12.5px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;
+    background:color-mix(in srgb,var(--fg) 8%,var(--panel));padding:1.5px 5px;border-radius:4px}
+  pre{margin:9px 0 0;background:color-mix(in srgb,var(--fg) 6%,var(--panel));
+    padding:11px 13px;border-radius:7px;overflow:auto;
+    font:12.5px/1.6 ui-monospace,SFMono-Regular,Menlo,monospace}
+  .hint{font-size:12.5px;color:var(--mut);margin:9px 0 0}
+  @media(max-width:560px){ th:nth-child(6),td:nth-child(6){display:none} }
+</style>
+</head>
+<body>
+<main>
+<header>
+  <h1>InvestingApp</h1>
+  <p class="sub">Página de pruebas. Habla con el servidor local, que es quien guarda las credenciales.</p>
+</header>
+
+<div id="banner"></div>
+
+<section>
+  <h2>Conexión</h2>
+  <div class="row">
+    <label class="sm mut" for="port">Puerto del servidor</label>
+    <input id="port" value="3000" size="5" inputmode="numeric">
+    <button id="btnConn" onclick="conectar()">Conectar</button>
+    <span id="connState" class="sm mut"></span>
+  </div>
+  <div id="health"></div>
+</section>
+
+<section>
+  <h2>Cartera</h2>
+  <div id="pf" class="mut sm">—</div>
+</section>
+
+<section>
+  <h2>Modificar posición</h2>
+  <div class="row">
+    <input id="sym" placeholder="SÍMBOLO" size="9" autocapitalize="characters" autocomplete="off">
+    <input id="qty" placeholder="cantidad" size="9" inputmode="decimal" autocomplete="off">
+    <button id="btnSet" onclick="guardar()">Guardar</button>
+  </div>
+  <p class="hint">Cualquier ticker sirve; se resuelve solo. <code>0</code> cierra la posición y el historial se conserva.</p>
+  <div id="setres"></div>
+</section>
+
+<section>
+  <h2>Plan de ingesta diaria</h2>
+  <p class="hint" style="margin:0 0 10px">Se construye desde los símbolos registrados, no de una lista fija.</p>
+  <div id="plan" class="mut sm">—</div>
+</section>
+
+<section>
+  <h2>Verificar deduplicación contra la SEC</h2>
+  <div class="row">
+    <input id="vs" placeholder="AAPL,SPY,SOXL" size="32" autocomplete="off">
+    <button id="btnVer" onclick="verificar()">Consultar</button>
+  </div>
+  <p class="hint">Consulta filings reales. Prueba <code>AAPL,SPY,SOXL</code> para ver los tres comportamientos distintos.</p>
+  <div id="vres"></div>
+</section>
+
+<section>
+  <h2>Eventos detectados</h2>
+  <div id="ev" class="mut sm">—</div>
+</section>
+</main>
+
+<script>
+let BASE = '';
+const $ = id => document.getElementById(id);
+const num = (v, d = 2) => v == null ? '—' : Number(v).toLocaleString('es', { maximumFractionDigits: d });
+const esc = s => String(s ?? '').replace(/[<>&"]/g, c => ({ '<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;' }[c]));
+const hora = s => { try { return new Date(s).toISOString().slice(0,16).replace('T',' '); } catch { return '—'; } };
+
+async function api(path, opts) {
+  const r = await fetch(BASE + path, opts);
+  const j = await r.json().catch(() => ({ error: 'respuesta ilegible del servidor' }));
+  if (!r.ok) throw new Error(j.error || ('HTTP ' + r.status));
+  return j;
+}
+
+function sinServidor(msg) {
+  $('banner').innerHTML = `<div class="banner bad">
+    <b>No hay conexión con el servidor local.</b>
+    <p class="sm" style="margin:7px 0 0">${esc(msg)}</p>
+    <p class="sm" style="margin:9px 0 0">Esta página no puede hablar directamente con la base de datos:
+    el navegador no habla el protocolo de PostgreSQL, y meter las credenciales aquí las dejaría
+    expuestas a cualquiera que abriera el archivo. El servidor local las guarda por ti.</p>
+    <pre>cd InvestingApp
+npm install
+npm run dev</pre>
+    <p class="sm mut" style="margin:9px 0 0">Necesita un <code>.env</code> con
+    <code>DATABASE_URL</code>, <code>SEC_USER_AGENT</code> y <code>FRED_API_KEY</code>.</p>
+  </div>`;
+}
+
+async function conectar() {
+  const port = ($('port').value || '3000').replace(/\D/g, '') || '3000';
+  BASE = `http://localhost:${port}`;
+  $('btnConn').disabled = true;
+  $('connState').textContent = 'probando…';
+
+  try {
+    const h = await api('/api/health');
+    $('connState').innerHTML = '<span class="ok">conectado</span>';
+    $('banner').innerHTML = '';
+    $('health').innerHTML = '<table style="margin-top:10px">' + Object.entries(h).map(([k, v]) => {
+      const malo = String(v).includes('ERROR') || String(v) === 'FALTA' || String(v) === 'sin configurar';
+      return `<tr><td class="mut sm" style="width:150px">${esc(k)}</td>
+        <td class="sm ${malo ? 'warn' : 'ok'}">${esc(v)}</td></tr>`;
+    }).join('') + '</table>';
+
+    cartera(); plan(); eventos();
+  } catch (e) {
+    $('connState').innerHTML = '<span class="err">sin conexión</span>';
+    $('health').innerHTML = '';
+    sinServidor(e.message);
+  } finally {
+    $('btnConn').disabled = false;
+  }
+}
+
+async function cartera() {
+  try {
+    const d = await api('/api/portfolio');
+    if (!d.positions.length) { $('pf').textContent = 'Sin posiciones registradas.'; return; }
+
+    let h = `<table><tr><th>Símbolo</th><th class="r">Cantidad</th><th class="r">Precio</th>
+      <th class="r">Valor</th><th class="r">Peso</th><th>Precio de</th></tr>`;
+    for (const p of d.positions) {
+      const peso = p.weightPct == null
+        ? '<span class="warn">—</span>'
+        : num(p.weightPct * 100, 1) + '%';
+      const origen = p.kind === 'quote' ? 'en vivo' : p.kind === 'close' ? 'cierre' : '';
+      h += `<tr><td><b>${esc(p.symbol)}</b></td>
+        <td class="r">${num(p.quantity, 8)}</td>
+        <td class="r">${num(p.price)}</td>
+        <td class="r">${num(p.marketValue)}</td>
+        <td class="r">${peso}</td>
+        <td class="mut sm">${origen} ${origen ? hora(p.at).slice(5) : ''}</td></tr>`;
+    }
+    h += `</table><p class="sm" style="margin:11px 0 0">Valor total: <b>${num(d.totalValue)}</b></p>`;
+
+    if (d.missingPrices.length) {
+      h += `<p class="warn sm" style="margin:5px 0 0">Sin precio: ${esc(d.missingPrices.join(', '))}.
+        Los pesos cubren el ${num(d.pricedCoverage * 100, 0)}% de las posiciones, así que no
+        representan el total real de la cartera.</p>`;
+    }
+    $('pf').innerHTML = h;
+  } catch (e) { $('pf').innerHTML = `<span class="err">${esc(e.message)}</span>`; }
+}
+
+async function plan() {
+  try {
+    const p = await api('/api/plan');
+    let h = '<div class="row" style="gap:16px">' + Object.entries(p.byKind)
+      .map(([k, v]) => `<span><b style="font-size:17px">${v}</b> <span class="mut sm">${esc(k)}</span></span>`)
+      .join('') + '</div>';
+    h += `<p class="sm mut" style="margin:11px 0 0"><b>${p.total}</b> tareas sobre
+      ${p.trackedSymbols.length} símbolos: ${esc(p.trackedSymbols.join(', '))}</p>`;
+    if (p.skippedSec.length) {
+      h += `<p class="sm mut" style="margin:5px 0 0">Sin capa SEC:
+        ${esc(p.skippedSec.map(s => s.symbol).join(', '))} — no presentan filings propios.</p>`;
+    }
+    $('plan').innerHTML = h;
+  } catch (e) { $('plan').innerHTML = `<span class="err">${esc(e.message)}</span>`; }
+}
+
+async function eventos() {
+  try {
+    const e = await api('/api/events');
+    if (!e.length) { $('ev').textContent = 'Sin eventos registrados todavía.'; return; }
+    let h = `<table><tr><th>Público desde</th><th>Tipo</th><th>Activos</th>
+      <th>Verificación</th><th>Título</th></tr>`;
+    for (const x of e) {
+      h += `<tr><td class="mut sm">${hora(x.available_at)}</td>
+        <td><span class="tag">${esc(x.event_type)}</span></td>
+        <td class="sm">${esc((x.affected_assets || []).join(', '))}</td>
+        <td class="mut sm">${esc(x.verification)}</td>
+        <td class="sm">${esc(x.title)}</td></tr>`;
+    }
+    $('ev').innerHTML = h + '</table>';
+  } catch (e) { $('ev').innerHTML = `<span class="err">${esc(e.message)}</span>`; }
+}
+
+async function guardar() {
+  const s = $('sym').value.trim(), q = $('qty').value.trim();
+  if (!s || q === '') { $('setres').innerHTML = '<p class="warn sm" style="margin:9px 0 0">Indica símbolo y cantidad.</p>'; return; }
+  $('btnSet').disabled = true;
+  try {
+    const r = await api('/api/position', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ symbol: s, quantity: q }),
+    });
+    $('setres').innerHTML = `<p class="ok sm" style="margin:9px 0 0">Guardado:
+      <b>${esc(r.symbol)}</b> = ${num(r.quantity, 8)}</p>`;
+    $('sym').value = ''; $('qty').value = '';
+    cartera(); plan();
+  } catch (e) {
+    $('setres').innerHTML = `<p class="err sm" style="margin:9px 0 0">${esc(e.message)}</p>`;
+  } finally { $('btnSet').disabled = false; }
+}
+
+async function verificar() {
+  const s = $('vs').value.trim();
+  if (!s) return;
+  $('btnVer').disabled = true;
+  $('vres').innerHTML = '<p class="mut sm" style="margin:10px 0 0">consultando la SEC…</p>';
+  try {
+    const d = await api('/api/verify?symbols=' + encodeURIComponent(s));
+    let h = '<table style="margin-top:11px"><tr><th>Símbolo</th><th>Resultado</th></tr>';
+    for (const r of d.results) {
+      let c;
+      if (r.status === 'ok') {
+        c = `<b>${r.inputCount}</b> documentos → <b>${r.eventCount}</b> eventos
+             <span class="mut">(${r.mergedCount} fusionados)</span>`
+          + r.merges.map(m => `<div class="mut sm" style="margin-top:3px">⤷ ${hora(m.at)} ·
+             ${esc(m.type)} · ${esc(m.docs.join(' + '))}</div>`).join('');
+      } else if (r.status === 'no_event_forms') {
+        c = '<span class="mut">registrado ante la SEC, pero no publica formularios de evento</span>';
+      } else if (r.status === 'no_cik') {
+        c = `<span class="mut">${esc(r.message)}</span>`;
+      } else {
+        c = `<span class="err">${esc(r.message)}</span>`;
+      }
+      h += `<tr><td><b>${esc(r.symbol)}</b>
+        <div class="mut sm">${esc(r.name || '')}</div></td><td class="sm">${c}</td></tr>`;
+    }
+    $('vres').innerHTML = h + '</table>';
+  } catch (e) {
+    $('vres').innerHTML = `<p class="err sm" style="margin:10px 0 0">${esc(e.message)}</p>`;
+  } finally { $('btnVer').disabled = false; }
+}
+
+for (const id of ['sym', 'qty']) $(id).addEventListener('keydown', e => { if (e.key === 'Enter') guardar(); });
+$('vs').addEventListener('keydown', e => { if (e.key === 'Enter') verificar(); });
+
+conectar();
+</script>
+</body>
+</html>

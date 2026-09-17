@@ -331,9 +331,42 @@ health();portfolio();plan();events();
 
 // ---------------------------------------------------------------------------
 
+/**
+ * Orígenes admitidos para peticiones desde el navegador.
+ *
+ * Se permite «null», que es el Origin de un archivo abierto con file://, para
+ * que el HTML suelto funcione con doble clic. Y localhost, para la página que
+ * sirve este mismo proceso.
+ *
+ * NO se usa un comodín: este servidor lee y modifica la cartera, y con CORS
+ * abierto cualquier web que el usuario visitara podría pedirle datos o
+ * cambiar posiciones a su espalda.
+ */
+function corsHeaders(origin: string | undefined): Record<string, string> {
+  const permitido =
+    origin === undefined ||
+    origin === 'null' ||
+    /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin);
+
+  if (!permitido) return {};
+  return {
+    'access-control-allow-origin': origin ?? 'null',
+    'access-control-allow-methods': 'GET, POST, OPTIONS',
+    'access-control-allow-headers': 'content-type',
+    'vary': 'origin',
+  };
+}
+
 const server = createServer(async (req: IncomingMessage, res: ServerResponse) => {
   const url = new URL(req.url ?? '/', `http://localhost:${PORT}`);
   const key = `${req.method} ${url.pathname}`;
+  const cors = corsHeaders(req.headers.origin);
+
+  if (req.method === 'OPTIONS') {
+    res.writeHead(204, cors);
+    res.end();
+    return;
+  }
 
   if (key === 'GET /') {
     res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
@@ -343,19 +376,19 @@ const server = createServer(async (req: IncomingMessage, res: ServerResponse) =>
 
   const handler = routes[key];
   if (!handler) {
-    res.writeHead(404, { 'content-type': 'application/json' });
+    res.writeHead(404, { ...cors, 'content-type': 'application/json' });
     res.end(JSON.stringify({ error: `Ruta no encontrada: ${key}` }));
     return;
   }
 
   try {
     const data = await handler(req, url);
-    res.writeHead(200, { 'content-type': 'application/json; charset=utf-8' });
+    res.writeHead(200, { ...cors, 'content-type': 'application/json; charset=utf-8' });
     res.end(JSON.stringify(data));
   } catch (e) {
     // El mensaje llega al navegador: útil para depurar, y no expone secretos
     // porque los errores de esta capa hablan de símbolos y validaciones.
-    res.writeHead(400, { 'content-type': 'application/json; charset=utf-8' });
+    res.writeHead(400, { ...cors, 'content-type': 'application/json; charset=utf-8' });
     res.end(JSON.stringify({ error: (e as Error).message }));
   }
 });
