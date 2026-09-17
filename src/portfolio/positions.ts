@@ -103,17 +103,47 @@ export interface PortfolioWeights {
  * cartera que suma 100% pero no es la real — el tipo de error que no falla
  * pero corrompe todo lo que venga después.
  */
+/**
+ * Valor de mercado de una posición, o null si no puede calcularse con
+ * honestidad.
+ *
+ * Se rechazan los casos que producirían un número plausible pero falso:
+ *
+ *  - Precio ≤ 0: en un instrumento cotizado es casi siempre un fallo de la
+ *    fuente, no una valoración real. Aceptarlo daría peso cero a una
+ *    posición que sí vale algo.
+ *  - Precio o cantidad no finitos: un NaN se propaga a todo el total y lo
+ *    convierte en NaN sin avisar.
+ *  - Cantidad negativa: la base lo impide, así que aquí significa corrupción.
+ *    Produciría un peso negativo, que no significa nada.
+ *  - Desbordamiento: el producto puede salirse del rango representable
+ *    aunque ambos factores sean finitos.
+ */
+function marketValueOf(quantity: number, price: number | null): number | null {
+  if (price === null || !Number.isFinite(price) || price <= 0) return null;
+  if (!Number.isFinite(quantity) || quantity < 0) return null;
+  const mv = quantity * price;
+  return Number.isFinite(mv) ? mv : null;
+}
+
 export function computeWeights(positions: readonly PricedPosition[]): PortfolioWeights {
   const missingPrices: string[] = [];
   let totalValue = 0;
 
+  const values = new Map<string, number | null>();
   for (const p of positions) {
-    if (p.price === null || !Number.isFinite(p.price)) missingPrices.push(p.symbol);
-    else totalValue += p.quantity * p.price;
+    const mv = marketValueOf(p.quantity, p.price);
+    values.set(p.symbol, mv);
+    if (mv === null) missingPrices.push(p.symbol);
+    else totalValue += mv;
   }
 
+  // Si la suma se desborda pese a que cada sumando era finito, no hay total
+  // sobre el que repartir pesos.
+  if (!Number.isFinite(totalValue)) totalValue = 0;
+
   const weighted: WeightedPosition[] = positions.map(p => {
-    const mv = p.price === null || !Number.isFinite(p.price) ? null : p.quantity * p.price;
+    const mv = values.get(p.symbol) ?? null;
     return {
       ...p,
       marketValue: mv,

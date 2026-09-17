@@ -26,8 +26,20 @@ async function getJson(url: string, headers: HeadersInit, f: typeof fetch): Prom
   return res.json();
 }
 
-/** CIK con el relleno a 10 dígitos que exigen las rutas de EDGAR. */
+/**
+ * CIK con el relleno a 10 dígitos que exigen las rutas de EDGAR.
+ *
+ * Valida antes de interpolar: este valor acaba dentro de una URL, y sin
+ * comprobarlo un identificador con barras o puntos podría redirigir la
+ * petición a otra ruta del servidor.
+ */
 export function cikPath(cik: string): string {
+  if (!/^[0-9]{1,10}$/.test(cik)) {
+    throw new Error(
+      `CIK inválido «${cik}»: debe ser de 1 a 10 dígitos. Se interpola en una ` +
+      `URL, así que no puede admitirse cualquier texto.`
+    );
+  }
   return `CIK${cik.padStart(10, '0')}`;
 }
 
@@ -127,6 +139,9 @@ export async function fetchMacroVintage(
   opts: { observationStart?: string } = {}
 ): Promise<MacroObservation[]> {
   const f = deps.fetchImpl ?? fetch;
+  if (!(asOf instanceof Date) || Number.isNaN(asOf.getTime())) {
+    throw new Error(`fetchMacroVintage: fecha inválida para el realtime period de «${seriesId}»`);
+  }
   const rt = asOf.toISOString().slice(0, 10);
 
   const url = new URL(`${FRED_BASE}/series/observations`);
@@ -197,6 +212,21 @@ export async function fetchNews(
 ): Promise<NewsArticle[]> {
   const f = fetchImpl ?? fetch;
   const sleep = opts.sleep ?? ((ms: number) => new Promise(r => setTimeout(r, ms)));
+
+  for (const [nombre, d] of [['inicio', start], ['fin', end]] as const) {
+    if (!(d instanceof Date) || Number.isNaN(d.getTime())) {
+      throw new Error(`fetchNews: fecha de ${nombre} inválida`);
+    }
+  }
+  // Una ventana invertida devolvería cero artículos sin error, y el día se
+  // daría por ingerido estando vacío.
+  if (start.getTime() >= end.getTime()) {
+    throw new Error(
+      `fetchNews: rango invertido (${start.toISOString()} → ${end.toISOString()}). ` +
+      `El inicio debe ser anterior al fin.`
+    );
+  }
+
   const stamp = (d: Date) => d.toISOString().replace(/[-:]/g, '').slice(0, 15).replace('T', '');
 
   const url = new URL(GDELT_BASE);

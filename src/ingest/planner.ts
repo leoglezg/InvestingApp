@@ -156,13 +156,17 @@ export function computeWindow(
   }
 
   const gapMs = now.getTime() - lastSuccessfulEnd.getTime();
-  const gapDays = Math.floor(gapMs / oneDay);
-  const cappedStart = new Date(Math.max(
-    lastSuccessfulEnd.getTime(),
-    now.getTime() - maxLookbackDays * oneDay
+  // Un reloj mal ajustado puede dejar la última ejecución en el futuro. Sin
+  // acotarlo, start quedaría por detrás de end y la ventana saldría
+  // invertida: la consulta no devolvería nada y el día se daría por ingerido.
+  const gapDays = Math.max(0, Math.floor(gapMs / oneDay));
+
+  const start = new Date(Math.min(
+    now.getTime(),
+    Math.max(lastSuccessfulEnd.getTime(), now.getTime() - maxLookbackDays * oneDay)
   ));
 
-  return { start: cappedStart, end, recoveringGap: gapDays >= 1, gapDays };
+  return { start, end, recoveringGap: gapDays >= 1, gapDays };
 }
 
 export interface TaskOutcome {
@@ -204,8 +208,14 @@ export function summarize(outcomes: readonly TaskOutcome[]): RunSummary {
     }
   }
 
+  // Una ejecución sin tareas NO es un éxito: significa que el plan salió
+  // vacío, y eso sólo pasa si algo falló antes (no hay símbolos, no se pudo
+  // leer el registro). Marcarla 'ok' haría creer que el día se ingirió y la
+  // siguiente ejecución no intentaría recuperarlo.
   const status: RunSummary['status'] =
-    failed === 0 ? 'ok' : ok === 0 ? 'failed' : 'partial';
+    outcomes.length === 0 ? 'failed'
+      : failed === 0 ? 'ok'
+        : ok === 0 ? 'failed' : 'partial';
 
   return { total: outcomes.length, ok, failed, skipped, rows, status, failures };
 }

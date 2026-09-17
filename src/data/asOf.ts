@@ -48,6 +48,35 @@ export interface Timestamped {
 }
 
 /**
+ * Normaliza a Date lo que venga, y rechaza lo que no sea un instante válido.
+ *
+ * NO es defensivo por costumbre: el driver de PostgreSQL devuelve timestamps
+ * como texto según cómo esté configurado el parseo de tipos. Comparar un
+ * string con un Date en JavaScript da SIEMPRE false, de modo que
+ * `'2026-12-31' > fechaDeHoy` es false y la violación de la LEY 1 pasaría
+ * inadvertida.
+ *
+ * Es el peor fallo posible en esta capa: no lanza, no avisa, y produce
+ * backtests que parecen correctos usando datos del futuro.
+ */
+function toInstant(value: unknown, context: string): Date {
+  if (value instanceof Date) {
+    if (Number.isNaN(value.getTime())) {
+      throw new MissingClockError(`${context}: la fecha es un Date inválido`);
+    }
+    return value;
+  }
+  if (typeof value === 'string' || typeof value === 'number') {
+    const d = new Date(value);
+    if (Number.isNaN(d.getTime())) {
+      throw new MissingClockError(`${context}: fecha ilegible «${String(value)}»`);
+    }
+    return d;
+  }
+  throw new MissingClockError(context);
+}
+
+/**
  * Contrato mínimo de la spec §1. Lanza excepción — nunca devuelve null.
  *
  * Devolver null ante una violación la volvería indistinguible de "no hay
@@ -55,15 +84,18 @@ export interface Timestamped {
  * tiene que ser ruidoso.
  */
 export function assertNoLookAhead(
-  dataPoint: { available_at: Date | null | undefined },
+  dataPoint: { available_at: Date | string | number | null | undefined },
   analysisTimestamp: Date,
   context = 'desconocido'
 ): void {
   if (dataPoint.available_at == null) {
     throw new MissingClockError(context);
   }
-  if (dataPoint.available_at > analysisTimestamp) {
-    throw new LookAheadViolationError(dataPoint.available_at, analysisTimestamp, context);
+  const available = toInstant(dataPoint.available_at, context);
+  const t = toInstant(analysisTimestamp, `${context} (instante de análisis)`);
+
+  if (available.getTime() > t.getTime()) {
+    throw new LookAheadViolationError(available, t, context);
   }
 }
 
@@ -99,10 +131,17 @@ export class AsOfContext {
     params: unknown[] = [],
     context = 'query'
   ): Promise<R[]> {
-    if (!/\$1\b/.test(sql)) {
+    // Los comentarios se descartan antes de comprobar: un "$1" dentro de un
+    // comentario satisfaría la comprobación textual sin que la consulta
+    // filtre nada, dejando pasar una consulta sin restricción temporal.
+    const sinComentarios = sql
+      .replace(/\/\*[\s\S]*?\*\//g, ' ')
+      .replace(/--[^\n]*/g, ' ');
+
+    if (!/\$1\b/.test(sinComentarios)) {
       throw new Error(
-        `LEY 1: la consulta en '${context}' no usa $1 (el instante T). ` +
-        `Toda consulta histórica debe filtrar por available_at <= $1.`
+        `LEY 1: la consulta en '${context}' no usa $1 (el instante T) fuera de ` +
+        `comentarios. Toda consulta histórica debe filtrar por available_at <= $1.`
       );
     }
 

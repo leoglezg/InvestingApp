@@ -179,14 +179,14 @@ describe('fetchNews — reintentos pacientes', () => {
     // ingerido sin estarlo.
     const m = mockFetch([{ status: 429 }]);
     await assert.rejects(
-      () => fetchNews('fed', new Date(), new Date(), { tries: 3, sleep: noSleep }, m.impl),
+      () => fetchNews('fed', new Date('2026-03-02'), new Date('2026-03-07'), { tries: 3, sleep: noSleep }, m.impl),
       /429 persistente/
     );
   });
 
   test('traduce seendate sin fingir que es la hora de publicación', async () => {
     const m = mockFetch([{ body }]);
-    const r = await fetchNews('fed', new Date(), new Date(), { sleep: noSleep }, m.impl);
+    const r = await fetchNews('fed', new Date('2026-03-02'), new Date('2026-03-07'), { sleep: noSleep }, m.impl);
     assert.equal(r[0].seenDate, '20260303T183000Z');
     assert.equal(r[0].domain, 'newsweek.com', 'el dominio permite asignar tier');
   });
