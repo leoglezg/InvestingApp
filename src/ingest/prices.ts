@@ -50,6 +50,24 @@ export class QuoteUnavailableError extends Error {
 }
 
 /**
+ * El proveedor ha dicho «ahora no», no «no existe».
+ *
+ * Es una clase aparte porque exige la reacción CONTRARIA a los demás fallos:
+ * ante un ticker desconocido, reintentar es perder tiempo; ante un límite por
+ * minuto, reintentar es lo único que funciona. Confundirlos hacía que una
+ * cartera de 9 símbolos en el plan gratuito (8 créditos/minuto) perdiera
+ * siempre el noveno y lo mostrara como si no tuviera precio.
+ */
+export class RateLimitError extends QuoteUnavailableError {
+  readonly retryAfterMs: number | null;
+  constructor(symbol: string, retryAfterMs: number | null) {
+    super(symbol, 'el plan permite un número limitado de llamadas por minuto');
+    this.name = 'RateLimitError';
+    this.retryAfterMs = retryAfterMs;
+  }
+}
+
+/**
  * Traduce el mensaje del proveedor a algo accionable.
  *
  * Ante un ticker que no reconoce responde «**symbol** or **figi** parameter is
@@ -68,6 +86,14 @@ function explainProviderError(message: string): string {
            `hoy no se puede pedir (${m})`;
   }
   return m || 'error del proveedor';
+}
+
+/** `Retry-After` en milisegundos, cuando el proveedor se molesta en decirlo. */
+function retryAfterMs(res: { headers?: { get(name: string): string | null } }): number | null {
+  const v = res.headers?.get('retry-after');
+  if (!v) return null;
+  const segundos = Number(v);
+  return Number.isFinite(segundos) && segundos >= 0 ? segundos * 1000 : null;
 }
 
 function num(v: unknown): number | null {
@@ -98,6 +124,13 @@ export async function fetchQuote(
   url.searchParams.set('apikey', apiKey);
 
   const res = await f(url.toString());
+
+  // 429 llega como código HTTP de verdad (visto con una cartera de 9 símbolos
+  // en el plan gratuito). Se distingue del resto para que quien llame pueda
+  // esperar y repetir en vez de dar el precio por perdido.
+  if (res.status === 429) {
+    throw new RateLimitError(symbol, retryAfterMs(res));
+  }
   if (!res.ok) throw new QuoteUnavailableError(symbol, `HTTP ${res.status}`);
 
   const data = await res.json() as Record<string, unknown>;
@@ -105,7 +138,12 @@ export async function fetchQuote(
   // El proveedor devuelve 200 con un cuerpo de error: un símbolo desconocido o
   // el límite de llamadas agotado no llegan como código HTTP.
   if (data.status === 'error' || data.code) {
-    throw new QuoteUnavailableError(symbol, explainProviderError(String(data.message ?? '')));
+    const mensaje = String(data.message ?? '');
+    // El mismo límite también aparece dentro de una respuesta 200.
+    if (Number(data.code) === 429 || /run out of API credits|per minute/i.test(mensaje)) {
+      throw new RateLimitError(symbol, null);
+    }
+    throw new QuoteUnavailableError(symbol, explainProviderError(mensaje));
   }
 
   const price = num(data.close);
@@ -154,28 +192,71 @@ export interface QuoteResult {
   error?: string;
 }
 
+export interface FetchQuotesOptions {
+  fetchImpl?: typeof fetch;
+  /** Pausa entre llamadas mientras el proveedor no proteste. */
+  delayMs?: number;
+  /** Pausa entre llamadas DESPUÉS de haber chocado con el límite. */
+  slowDelayMs?: number;
+  /** Cuánto esperar antes de repetir un símbolo que dio 429. */
+  cooldownMs?: number;
+  /** Cuántas veces repetir un símbolo frenado. 0 lo desactiva. */
+  maxRetries?: number;
+  sleep?: (ms: number) => Promise<void>;
+}
+
 /**
  * Precios de varios símbolos.
  *
- * Secuencial a propósito: el plan gratuito del proveedor limita las llamadas
- * por minuto, y una ráfaga en paralelo lo agota y devuelve errores para todos.
- * Un fallo individual no aborta el resto — cada símbolo lleva su resultado.
+ * Secuencial a propósito: el plan gratuito limita las llamadas por minuto y
+ * una ráfaga en paralelo lo agota y devuelve errores para todos. Un fallo
+ * individual no aborta el resto — cada símbolo lleva su resultado.
+ *
+ * El ritmo se adapta en vez de fijarse de antemano. Empieza rápido, porque una
+ * cartera pequeña cabe de sobra en el límite y no tiene por qué tardar; y sólo
+ * si el proveedor frena se espacia y se repite el símbolo frenado. Fijar de
+ * entrada la pausa lenta castigaría a todas las carteras por lo que sólo le
+ * pasa a las grandes, y no espaciar nunca perdía un precio que sí existe:
+ * con 9 símbolos y 8 créditos por minuto, el noveno se mostraba «sin precio».
  */
 export async function fetchQuotes(
   symbols: readonly string[],
   apiKey: string,
-  opts: { fetchImpl?: typeof fetch; delayMs?: number; sleep?: (ms: number) => Promise<void> } = {}
+  opts: FetchQuotesOptions = {}
 ): Promise<QuoteResult[]> {
   const sleep = opts.sleep ?? ((ms: number) => new Promise(r => setTimeout(r, ms)));
-  const delay = opts.delayMs ?? 250;
+  const rapido = opts.delayMs ?? 250;
+  const lento = opts.slowDelayMs ?? 8_000;
+  const cooldown = opts.cooldownMs ?? 15_000;
+  const maxRetries = opts.maxRetries ?? 2;
+
   const out: QuoteResult[] = [];
+  let frenado = false;
 
   for (let i = 0; i < symbols.length; i++) {
-    if (i > 0 && delay > 0) await sleep(delay);
-    try {
-      out.push({ symbol: symbols[i], quote: await fetchQuote(symbols[i], apiKey, opts.fetchImpl) });
-    } catch (e) {
-      out.push({ symbol: symbols[i], error: (e as Error).message });
+    if (i > 0) {
+      const pausa = frenado ? lento : rapido;
+      if (pausa > 0) await sleep(pausa);
+    }
+
+    const symbol = symbols[i];
+    let intento = 0;
+    for (;;) {
+      try {
+        out.push({ symbol, quote: await fetchQuote(symbol, apiKey, opts.fetchImpl) });
+        break;
+      } catch (e) {
+        if (e instanceof RateLimitError && intento < maxRetries) {
+          // A partir de aquí el resto de la cartera va despacio: si ya se ha
+          // agotado el cupo, seguir al ritmo rápido sólo produce más rebotes.
+          frenado = true;
+          intento++;
+          await sleep(e.retryAfterMs ?? cooldown);
+          continue;
+        }
+        out.push({ symbol, error: (e as Error).message });
+        break;
+      }
     }
   }
   return out;

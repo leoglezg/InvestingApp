@@ -1,14 +1,19 @@
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
-import { fetchQuote, fetchQuotes, hasProviderInstant, QuoteUnavailableError } from '../src/ingest/prices.ts';
+import { fetchQuote, fetchQuotes, hasProviderInstant, QuoteUnavailableError, RateLimitError } from '../src/ingest/prices.ts';
 
-function mockFetch(responses: { status?: number; body?: unknown }[]) {
+function mockFetch(responses: { status?: number; body?: unknown; retryAfter?: string }[]) {
   const calls: string[] = [];
   let i = 0;
   const impl = (async (url: string | URL) => {
     calls.push(String(url));
     const r = responses[Math.min(i++, responses.length - 1)];
-    return { ok: (r.status ?? 200) < 400, status: r.status ?? 200, json: async () => r.body };
+    return {
+      ok: (r.status ?? 200) < 400,
+      status: r.status ?? 200,
+      headers: { get: (n: string) => (n.toLowerCase() === 'retry-after' ? r.retryAfter ?? null : null) },
+      json: async () => r.body,
+    };
   }) as unknown as typeof fetch;
   return { impl, calls };
 }
@@ -115,9 +120,11 @@ describe('fetchQuote', () => {
       status: 'error', code: 429,
       message: 'You have run out of API credits for the current minute.',
     } }]);
+    // Es su propia clase, no un fallo genérico: quien llame tiene que poder
+    // decidir «espero y repito» en vez de «este ticker no tiene precio».
     await assert.rejects(
       () => fetchQuote('AAPL', 'KEY', m.impl),
-      (e: Error) => /límite de llamadas/.test(e.message)
+      (e: Error) => e instanceof RateLimitError
     );
   });
 
@@ -183,6 +190,70 @@ describe('fetchQuotes — un fallo no arrastra al resto', () => {
       sleep: async ms => { esperas.push(ms); },
     });
     assert.deepEqual(esperas, [200, 200], 'una pausa entre llamadas, no antes de la primera');
+  });
+
+  test('un 429 se repite en vez de darse por perdido', async () => {
+    // Lo que le pasó a una cartera de 9 símbolos con 8 créditos por minuto:
+    // el noveno rebotaba y se mostraba «sin precio», cuando el precio existía
+    // y sólo hacía falta esperar.
+    const m = mockFetch([{ status: 429 }, { body: quoteOk }]);
+    const esperas: number[] = [];
+    const r = await fetchQuotes(['SOXL'], 'KEY', {
+      fetchImpl: m.impl, cooldownMs: 15_000,
+      sleep: async ms => { esperas.push(ms); },
+    });
+    assert.equal(r[0].quote?.price, 115.25);
+    assert.deepEqual(esperas, [15_000]);
+    assert.equal(m.calls.length, 2);
+  });
+
+  test('respeta Retry-After cuando el proveedor lo envía', async () => {
+    const m = mockFetch([{ status: 429, retryAfter: '3' }, { body: quoteOk }]);
+    const esperas: number[] = [];
+    await fetchQuotes(['SOXL'], 'KEY', {
+      fetchImpl: m.impl, cooldownMs: 15_000,
+      sleep: async ms => { esperas.push(ms); },
+    });
+    assert.deepEqual(esperas, [3_000], 'la cabecera manda sobre nuestro valor por defecto');
+  });
+
+  test('tras chocar con el límite, el resto va más despacio', async () => {
+    // Seguir al ritmo rápido después de agotar el cupo sólo produce más
+    // rebotes: cada uno gasta una llamada y no trae ningún precio.
+    const m = mockFetch([{ status: 429 }, { body: quoteOk }, { body: quoteOk }]);
+    const esperas: number[] = [];
+    await fetchQuotes(['A', 'B'], 'KEY', {
+      fetchImpl: m.impl, delayMs: 250, slowDelayMs: 8_000, cooldownMs: 15_000,
+      sleep: async ms => { esperas.push(ms); },
+    });
+    assert.deepEqual(esperas, [15_000, 8_000], 'reintento, y luego pausa larga antes del siguiente');
+  });
+
+  test('si el límite no cede, se informa como límite y no como ticker inexistente', async () => {
+    const m = mockFetch([{ status: 429 }]);
+    const r = await fetchQuotes(['SOXL'], 'KEY', {
+      fetchImpl: m.impl, maxRetries: 1, sleep: async () => {},
+    });
+    assert.match(r[0].error!, /llamadas por minuto/);
+    assert.equal(m.calls.length, 2, 'un intento más, y se rinde');
+  });
+
+  test('el límite también se detecta dentro de una respuesta 200', async () => {
+    const m = mockFetch([
+      { body: { status: 'error', code: 429, message: 'You have run out of API credits' } },
+      { body: quoteOk },
+    ]);
+    const r = await fetchQuotes(['SOXL'], 'KEY', { fetchImpl: m.impl, sleep: async () => {} });
+    assert.equal(r[0].quote?.price, 115.25);
+  });
+
+  test('un ticker desconocido NO se reintenta', async () => {
+    // Repetir una pregunta cuya respuesta no va a cambiar gasta cupo que le
+    // hace falta a los símbolos que sí existen.
+    const m = mockFetch([{ body: { status: 'error', code: 400, message: 'symbol not found' } }]);
+    const r = await fetchQuotes(['NOEXISTE'], 'KEY', { fetchImpl: m.impl, sleep: async () => {} });
+    assert.ok(r[0].error);
+    assert.equal(m.calls.length, 1);
   });
 
   test('lista vacía no llama a nada', async () => {

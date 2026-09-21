@@ -288,7 +288,10 @@ async function guardar() {
 
 async function refrescarPrecios() {
   $('btnPx').disabled = true;
-  $('pxres').textContent = 'consultando…';
+  // El plan gratuito limita las llamadas por minuto: con una cartera grande
+  // el servidor espera y repite en vez de perder precios, y eso se nota. Sin
+  // avisar, parecería que se ha quedado colgado.
+  $('pxres').textContent = 'consultando… (si el plan frena, espera y reintenta)';
   try {
     const r = await api('/api/refresh-prices', { method: 'POST' });
     const fallos = (r.failed || []).length;
