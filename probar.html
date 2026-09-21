@@ -245,9 +245,20 @@ async function guardar() {
       method: 'POST', headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ symbol: s, quantity: q }),
     });
-    const nota = r.priceNote
-      ? ` <span class="${/precio /.test(r.priceNote) ? 'mut' : 'warn'}">· ${esc(r.priceNote)}</span>`
-      : '';
+    // Se mira `price`, no el texto de la nota: antes se decidía si había
+    // precio buscando la palabra "precio" dentro del mensaje, y cualquier
+    // cambio de redacción convertía un acierto en un aviso.
+    let nota = '';
+    if (r.price) {
+      const p = r.price;
+      const cuando = new Date(p.quotedAt).toLocaleString();
+      nota = ` <span class="mut">· <b>${num(p.value, 4)}</b>`
+        + `${p.currency ? ' ' + esc(p.currency) : ''}`
+        + `${p.exchange ? ' (' + esc(p.exchange) + ')' : ''}`
+        + ` · ${esc(p.label)} ${esc(cuando)}</span>`;
+    } else if (r.priceNote) {
+      nota = ` <span class="warn">· ${esc(r.priceNote)}</span>`;
+    }
     $('setres').innerHTML = `<p class="ok sm" style="margin:9px 0 0">Guardado:
       <b>${esc(r.symbol)}</b> = ${num(r.quantity, 8)}${nota}</p>`;
     $('sym').value = ''; $('qty').value = '';
@@ -265,7 +276,11 @@ async function refrescarPrecios() {
     const fallos = (r.failed || []).length;
     $('pxres').innerHTML = `<span class="${fallos ? 'warn' : 'ok'}">`
       + `${r.updated} de ${r.total} actualizados`
-      + (fallos ? ` · sin precio: ${esc(r.failed.map(f => f.symbol).join(', '))}` : '')
+      // Un símbolo "sin cambio" ya tenía ese mismo instante: no es un fallo,
+      // pero tampoco es una actualización. Contarlo como actualizado haría
+      // creer que el precio se refrescó cuando no se movió nada.
+      + (r.sinCambio ? ` · ${r.sinCambio} sin cambio` : '')
+      + (fallos ? ` · sin precio: ${esc(r.failed.map(f => f.symbol + ' (' + f.error + ')').join('; '))}` : '')
       + '</span>';
     cartera();
   } catch (e) {

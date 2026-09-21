@@ -24,7 +24,7 @@ import { loadSecTickers, resolveSymbol, describeResolution } from '../src/data/s
 import { fetchSecFilings, EVENT_FORMS, type SecFiling } from '../src/ingest/sources.ts';
 import { clusterCandidates, summarizeDedup, type DedupCandidate } from '../src/dedup/cluster.ts';
 import { planDailyIngest } from '../src/ingest/planner.ts';
-import { fetchQuote, fetchQuotes } from '../src/ingest/prices.ts';
+import { fetchQuote, fetchQuotes, hasProviderInstant, type Quote } from '../src/ingest/prices.ts';
 
 const PORT = Number(process.env.PORT ?? 3000);
 const DB = process.env.DATABASE_URL;
@@ -43,6 +43,35 @@ async function q<T = Record<string, unknown>>(sql: string, params: unknown[] = [
   } finally {
     c.release();
   }
+}
+
+/**
+ * Guarda un quote. Devuelve true si entró una observación nueva.
+ *
+ * Único punto de escritura en market_quotes, y único sitio donde se comprueba
+ * la regla que hace que `available_at` signifique algo: el instante tiene que
+ * venir del proveedor (OP-6). Si viniera de nuestro reloj, `available_at` ya
+ * no diría cuándo existió el precio sino cuándo lo pedimos, y toda consulta
+ * "el precio vigente en T" quedaría contaminada. En ese caso no se escribe.
+ */
+async function persistQuote(quote: Quote): Promise<boolean> {
+  if (!hasProviderInstant(quote)) {
+    throw new Error(
+      `${quote.symbol}: el proveedor no fechó el precio y no se puede usar ` +
+      `nuestro reloj como available_at (LEY 6). Precio recibido: ${quote.price}.`
+    );
+  }
+  const r = await q(
+    `INSERT INTO market_quotes (symbol, price, quoted_at, available_at, is_market_open, provider)
+     VALUES ($1,$2,$3,$3,$4,$5)
+     ON CONFLICT (symbol, quoted_at, provider) DO NOTHING
+     RETURNING id`,
+    [quote.symbol, quote.price, quote.quotedAt, quote.isMarketOpen, quote.provider]
+  );
+  // Sin filas no es un fallo: es que ya teníamos ese mismo instante. Importa
+  // distinguirlo de una inserción real para no informar de un refresco que no
+  // ocurrió.
+  return r.length > 0;
 }
 
 function classify(f: SecFiling): string {
@@ -210,19 +239,18 @@ const routes: Record<string, (req: IncomingMessage, url: URL) => Promise<unknown
 
     const results = await fetchQuotes(rows.map(r => r.symbol), key);
     let updated = 0;
+    let sinCambio = 0;
     const failed: { symbol: string; error: string }[] = [];
 
     for (const r of results) {
       if (!r.quote) { failed.push({ symbol: r.symbol, error: r.error ?? 'desconocido' }); continue; }
-      await q(
-        `INSERT INTO market_quotes (symbol, price, quoted_at, available_at, is_market_open, provider)
-         VALUES ($1,$2,$3,$3,$4,'twelvedata')
-         ON CONFLICT (symbol, quoted_at, provider) DO NOTHING`,
-        [r.quote.symbol, r.quote.price, r.quote.quotedAt, r.quote.isMarketOpen]
-      );
-      updated++;
+      try {
+        if (await persistQuote(r.quote)) updated++; else sinCambio++;
+      } catch (e) {
+        failed.push({ symbol: r.symbol, error: (e as Error).message });
+      }
     }
-    return { updated, failed, total: results.length };
+    return { updated, sinCambio, failed, total: results.length };
   },
 
   'POST /api/position': async (req) => {
@@ -250,23 +278,33 @@ const routes: Record<string, (req: IncomingMessage, url: URL) => Promise<unknown
     // usuario no sabe si es que falta el dato o si algo falló. Un fallo aquí
     // NO invalida la posición, que ya está registrada: se informa y punto.
     let priceNote: string | null = null;
+    let price: Record<string, unknown> | null = null;
     const key = process.env.TWELVEDATA_API_KEY ?? '';
     if (quantity > 0) {
       try {
         const quote = await fetchQuote(symbol, key);
-        await q(
-          `INSERT INTO market_quotes (symbol, price, quoted_at, available_at, is_market_open, provider)
-           VALUES ($1,$2,$3,$3,$4,'twelvedata')
-           ON CONFLICT (symbol, quoted_at, provider) DO NOTHING`,
-          [quote.symbol, quote.price, quote.quotedAt, quote.isMarketOpen]
-        );
-        priceNote = `precio ${quote.price}`;
+        await persistQuote(quote);
+        // Se devuelve el precio entero, no sólo un texto: la interfaz lo
+        // muestra en el acto sin tener que releer la cartera, y el instante
+        // viaja con él para que se vea DE CUÁNDO es el precio.
+        price = {
+          value: quote.price,
+          currency: quote.currency,
+          quotedAt: quote.quotedAt.toISOString(),
+          isMarketOpen: quote.isMarketOpen,
+          exchange: quote.exchange,
+          name: quote.name,
+          // Con el mercado cerrado esto no es un precio vivo sino el último
+          // cruce. Llamarlo "actual" sería falsearlo.
+          label: quote.isMarketOpen ? 'en vivo' : 'último cierre negociado',
+        };
+        priceNote = `${quote.price}${quote.currency ? ' ' + quote.currency : ''}`;
       } catch (e) {
         priceNote = (e as Error).message;
       }
     }
 
-    return { ok: true, symbol, quantity, priceNote };
+    return { ok: true, symbol, quantity, price, priceNote };
   },
 };
 

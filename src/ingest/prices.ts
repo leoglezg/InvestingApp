@@ -9,15 +9,35 @@
 
 const BASE = 'https://api.twelvedata.com';
 
+/**
+ * De dónde salió `quotedAt`. No es metadato decorativo: sólo los dos primeros
+ * valores son instantes del proveedor y por tanto válidos como `available_at`
+ * (OP-6). `request_time` es nuestro reloj y no puede escribirse en la tabla.
+ */
+export type QuotedAtSource = 'last_quote_at' | 'timestamp' | 'request_time';
+
 export interface Quote {
   symbol: string;
   price: number;
   /** Instante del precio SEGÚN EL PROVEEDOR, no la hora de nuestra petición. */
   quotedAt: Date;
+  quotedAtSource: QuotedAtSource;
   isMarketOpen: boolean;
   /** Cierre de la sesión anterior: ése sí es un hecho consumado. */
   previousClose: number | null;
   name: string | null;
+  /** Quién dio el dato. Va a la tabla: un precio sin procedencia no es un dato. */
+  provider: string;
+  /** Mercado donde cotiza, cuando el proveedor lo dice. */
+  exchange: string | null;
+  currency: string | null;
+}
+
+export const PROVIDER = 'twelvedata';
+
+/** Cierto sólo si el instante lo puso el proveedor, no nosotros. */
+export function hasProviderInstant(q: Quote): boolean {
+  return q.quotedAtSource !== 'request_time';
 }
 
 export class QuoteUnavailableError extends Error {
@@ -27,6 +47,27 @@ export class QuoteUnavailableError extends Error {
     this.name = 'QuoteUnavailableError';
     this.symbol = symbol;
   }
+}
+
+/**
+ * Traduce el mensaje del proveedor a algo accionable.
+ *
+ * Ante un ticker que no reconoce responde «**symbol** or **figi** parameter is
+ * missing or invalid» — comprobado con ZZQQXX el 2026-09-21. Tal cual, parece
+ * un fallo nuestro al construir la petición, y no lo es. El texto original se
+ * conserva detrás para no perder información al diagnosticar.
+ */
+function explainProviderError(message: string): string {
+  const m = message.trim();
+  if (/symbol.*(missing or invalid|not found)/i.test(m)) {
+    return `el proveedor no reconoce este ticker. Comprueba que esté bien ` +
+           `escrito y que cotice en un mercado cubierto por tu plan (${m})`;
+  }
+  if (/limit|credits|quota/i.test(m)) {
+    return `se agotó el límite de llamadas del plan; el precio existe pero ` +
+           `hoy no se puede pedir (${m})`;
+  }
+  return m || 'error del proveedor';
 }
 
 function num(v: unknown): number | null {
@@ -64,7 +105,7 @@ export async function fetchQuote(
   // El proveedor devuelve 200 con un cuerpo de error: un símbolo desconocido o
   // el límite de llamadas agotado no llegan como código HTTP.
   if (data.status === 'error' || data.code) {
-    throw new QuoteUnavailableError(symbol, String(data.message ?? 'error del proveedor'));
+    throw new QuoteUnavailableError(symbol, explainProviderError(String(data.message ?? '')));
   }
 
   const price = num(data.close);
@@ -72,18 +113,38 @@ export async function fetchQuote(
     throw new QuoteUnavailableError(symbol, 'el proveedor no devolvió un precio válido');
   }
 
-  // `timestamp` viene en segundos. Si falta, se usa la hora actual y se anota
-  // el matiz: es lo mejor disponible, pero no es el instante del proveedor.
-  const ts = num(data.timestamp);
+  // `last_quote_at` ANTES que `timestamp`. Verificado contra la API real el
+  // 2026-09-17: con el mercado abierto los dos campos vienen y NO son lo mismo.
+  //
+  //   QQQM  timestamp 13:30:00Z   last_quote_at 18:06:00Z
+  //   SOXL  timestamp 13:30:00Z   last_quote_at 18:07:00Z
+  //   LLY   timestamp 13:30:00Z   last_quote_at 18:07:00Z
+  //
+  // `timestamp` es el instante de la VELA (la apertura de la sesión: idéntico
+  // para los tres); `last_quote_at` es el instante del cruce. Usar `timestamp`
+  // fechaba un precio de las 18:07 como si existiera a las 13:30 — casi cinco
+  // horas de adelanto, que es exactamente lo que prohíbe la LEY 1 al escribirse
+  // en `available_at`. Y como quote_uq es (symbol, quoted_at, provider), todas
+  // las actualizaciones del día colisionaban en la misma clave: el precio se
+  // congelaba en la primera y el ON CONFLICT DO NOTHING lo ocultaba.
+  const ts = num(data.last_quote_at) ?? num(data.timestamp);
+  const source: QuotedAtSource =
+    num(data.last_quote_at) !== null ? 'last_quote_at'
+    : ts !== null ? 'timestamp'
+    : 'request_time';
   const quotedAt = ts !== null ? new Date(ts * 1000) : new Date();
 
   return {
     symbol: String(data.symbol ?? symbol).toUpperCase(),
     price,
     quotedAt,
+    quotedAtSource: source,
     isMarketOpen: data.is_market_open === true || data.is_market_open === 'true',
     previousClose: num(data.previous_close),
     name: typeof data.name === 'string' ? data.name : null,
+    provider: PROVIDER,
+    exchange: typeof data.exchange === 'string' ? data.exchange : null,
+    currency: typeof data.currency === 'string' ? data.currency : null,
   };
 }
 
