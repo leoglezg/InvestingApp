@@ -56,6 +56,7 @@
     padding:11px 13px;border-radius:7px;overflow:auto;
     font:12.5px/1.6 ui-monospace,SFMono-Regular,Menlo,monospace}
   .hint{font-size:12.5px;color:var(--mut);margin:9px 0 0}
+  a{color:var(--acc);text-decoration:none} a:hover{text-decoration:underline}
   @media(max-width:560px){ th:nth-child(6),td:nth-child(6){display:none} }
 </style>
 </head>
@@ -112,6 +113,18 @@
     <span id="bulkest" class="sm mut"></span>
   </div>
   <div id="bulkres"></div>
+</section>
+
+<section>
+  <h2>Símbolos seguidos</h2>
+  <p class="hint">Cada símbolo seguido consume una llamada al proveedor en cada refresco.
+    Dejar de seguir uno <b>no borra nada</b>: el histórico ya recogido se conserva,
+    porque es lo único con lo que después se puede comprobar si una alerta acertó.</p>
+  <div class="row">
+    <button id="btnSyms" onclick="simbolos()">Ver símbolos</button>
+    <span id="symsest" class="sm mut"></span>
+  </div>
+  <div id="symsres"></div>
 </section>
 
 <section>
@@ -197,18 +210,22 @@ async function cartera() {
     if (!d.positions.length) { $('pf').textContent = 'Sin posiciones registradas.'; return; }
 
     let h = `<table><tr><th>Símbolo</th><th class="r">Cantidad</th><th class="r">Precio</th>
-      <th class="r">Valor</th><th class="r">Peso</th><th>Precio de</th></tr>`;
+      <th class="r">Valor</th><th class="r">Peso</th><th>Precio de</th><th></th></tr>`;
     for (const p of d.positions) {
       const peso = p.weightPct == null
         ? '<span class="warn">—</span>'
         : num(p.weightPct * 100, 1) + '%';
       const origen = p.kind === 'quote' ? 'en vivo' : p.kind === 'close' ? 'cierre' : '';
-      h += `<tr><td><b>${esc(p.symbol)}</b></td>
+      const s = esc(p.symbol);
+      h += `<tr><td><b>${s}</b></td>
         <td class="r">${num(p.quantity, 8)}</td>
         <td class="r">${num(p.price)}</td>
         <td class="r">${num(p.marketValue)}</td>
         <td class="r">${peso}</td>
-        <td class="mut sm">${origen} ${origen ? hora(p.at).slice(5) : ''}</td></tr>`;
+        <td class="mut sm">${origen} ${origen ? hora(p.at).slice(5) : ''}</td>
+        <td class="sm" style="white-space:nowrap">
+          <a href="#" onclick="editar('${s}',${p.quantity});return false">editar</a> ·
+          <a href="#" onclick="cerrar('${s}');return false">cerrar</a></td></tr>`;
     }
     h += `</table><p class="sm" style="margin:11px 0 0">Valor total: <b>${num(d.totalValue)}</b></p>`;
 
@@ -338,6 +355,81 @@ async function verificar() {
   } catch (e) {
     $('vres').innerHTML = `<p class="err sm" style="margin:10px 0 0">${esc(e.message)}</p>`;
   } finally { $('btnVer').disabled = false; }
+}
+
+// --- editar y cerrar posiciones -------------------------------------------
+
+// Lleva el símbolo y la cantidad al formulario de arriba en vez de abrir un
+// cuadro de edición propio: es el mismo camino que ya existe y que ya está
+// probado, y así sólo hay UNA forma de escribir una posición.
+function editar(symbol, quantity) {
+  $('sym').value = symbol;
+  $('qty').value = quantity;
+  $('qty').focus();
+  $('qty').select();
+  $('setres').innerHTML = `<p class="mut sm" style="margin:9px 0 0">Editando
+    <b>${esc(symbol)}</b>: cambia la cantidad y pulsa Guardar.</p>`;
+  $('sym').scrollIntoView({ behavior: 'smooth', block: 'center' });
+}
+
+async function cerrar(symbol) {
+  // Cerrar es registrar cantidad 0, no borrar la fila. La cartera de ayer
+  // tiene que seguir valorándose con las posiciones de ayer: si se borrara,
+  // no habría contra qué comparar una recomendación pasada.
+  if (!confirm(`¿Cerrar la posición de ${symbol}?\n\n`
+    + 'Se registra cantidad 0 y deja de contar en la cartera. '
+    + 'El histórico se conserva, así que es reversible.')) return;
+  try {
+    await api('/api/position', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ symbol, quantity: 0, note: 'cerrada desde la interfaz' }),
+    });
+    cartera(); plan();
+    if ($('symsres').innerHTML) simbolos();
+  } catch (e) { alert(e.message); }
+}
+
+// --- símbolos seguidos ----------------------------------------------------
+
+async function simbolos() {
+  $('btnSyms').disabled = true;
+  $('symsest').textContent = 'consultando…';
+  try {
+    const rows = await api('/api/symbols');
+    const seguidos = rows.filter(r => r.is_tracked).length;
+    $('symsest').innerHTML = `<span class="mut">${rows.length} registrados · `
+      + `${seguidos} seguidos</span>`;
+
+    let h = '<table style="margin-top:12px"><tr><th>Símbolo</th><th>Nombre</th>'
+      + '<th class="r">Cantidad</th><th>Tipo</th><th>Seguimiento</th></tr>';
+    for (const r of rows) {
+      const q = Number(r.quantity);
+      const s = esc(r.symbol);
+      h += `<tr><td><b>${s}</b></td>`
+        + `<td class="sm mut">${esc(r.display_name || '')}</td>`
+        // Una posición cerrada se dice, no se deja en blanco: en blanco
+        // parecería que falta el dato.
+        + `<td class="r">${q > 0 ? num(q, 8) : '<span class="mut sm">cerrada</span>'}</td>`
+        + `<td class="sm mut">${esc(r.asset_type)}${r.cik ? ' <span class="tag">SEC</span>' : ''}</td>`
+        + `<td class="sm">${r.is_tracked
+            ? `<span class="ok">sí</span> · <a href="#" onclick="seguir('${s}',false);return false">dejar de seguir</a>`
+            : `<span class="mut">no</span> · <a href="#" onclick="seguir('${s}',true);return false">seguir</a>`}</td></tr>`;
+    }
+    $('symsres').innerHTML = h + '</table>';
+  } catch (e) {
+    $('symsest').innerHTML = `<span class="err">${esc(e.message)}</span>`;
+    $('symsres').innerHTML = '';
+  } finally { $('btnSyms').disabled = false; }
+}
+
+async function seguir(symbol, tracked) {
+  try {
+    await api('/api/symbol/tracking', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ symbol, tracked }),
+    });
+    simbolos(); plan();
+  } catch (e) { alert(e.message); }
 }
 
 // --- importar la cartera pegada -------------------------------------------

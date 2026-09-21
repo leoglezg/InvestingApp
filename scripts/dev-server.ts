@@ -185,8 +185,26 @@ const routes: Record<string, (req: IncomingMessage, url: URL) => Promise<unknown
     };
   },
 
+  /**
+   * Todos los símbolos conocidos, con su posición actual y si se sigue.
+   *
+   * Incluye los que tienen posición cerrada, que no salen en la cartera. Esos
+   * son justamente los que conviene poder ver: siguen consumiendo llamadas al
+   * proveedor en cada refresco, y sin listarlos en algún sitio no hay forma
+   * de darse cuenta.
+   */
   'GET /api/symbols': async () =>
-    q(`SELECT symbol, display_name, cik, asset_type, is_tracked FROM symbols ORDER BY symbol`),
+    q(`
+      SELECT s.symbol, s.display_name, s.asset_type, s.cik, s.is_tracked,
+             COALESCE(p.quantity, 0) AS quantity
+      FROM symbols s
+      LEFT JOIN LATERAL (
+        SELECT pp.quantity FROM portfolio_positions pp
+        WHERE pp.symbol = s.symbol AND pp.effective_from <= now()   -- LEY 1
+        ORDER BY pp.effective_from DESC LIMIT 1
+      ) p ON true
+      ORDER BY (COALESCE(p.quantity,0) > 0) DESC, s.symbol
+    `),
 
   'GET /api/events': async (_req, url) => {
     const symbol = url.searchParams.get('symbol');
@@ -305,6 +323,27 @@ const routes: Record<string, (req: IncomingMessage, url: URL) => Promise<unknown
    * Direxion en NYSE y un 4x de otro emisor en Londres), conviene poder mirar
    * antes de escribir.
    */
+  /**
+   * Activa o desactiva el seguimiento de un símbolo.
+   *
+   * No se borra la fila. El esquema lo dice desde el principio: desactivar en
+   * vez de borrar conserva el histórico ya recogido, y ese histórico es lo
+   * único con lo que después se puede comprobar si una alerta pasada acertó.
+   * Borrar el símbolo borraría la prueba.
+   */
+  'POST /api/symbol/tracking': async (req) => {
+    const body = await readBody(req);
+    const symbol = normalizeSymbol(String(body.symbol ?? ''));
+    const tracked = body.tracked === true;
+
+    const r = await q<{ symbol: string }>(
+      'UPDATE symbols SET is_tracked = $2 WHERE symbol = $1 RETURNING symbol',
+      [symbol, tracked]
+    );
+    if (r.length === 0) throw new Error(`${symbol} no está registrado`);
+    return { symbol, tracked };
+  },
+
   /**
    * Busca por ticker o por nombre. Devuelve todas las cotizaciones y cuál
    * elegiría el sistema, para que se vea la diferencia cuando la hay.
