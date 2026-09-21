@@ -25,6 +25,8 @@ import { fetchSecFilings, EVENT_FORMS, type SecFiling } from '../src/ingest/sour
 import { clusterCandidates, summarizeDedup, type DedupCandidate } from '../src/dedup/cluster.ts';
 import { planDailyIngest } from '../src/ingest/planner.ts';
 import { fetchQuote, fetchQuotes, hasProviderInstant, type Quote } from '../src/ingest/prices.ts';
+import { resolveTicker, searchSymbol, chooseListing, type Listing } from '../src/ingest/symbols.ts';
+import { parsePortfolioText } from '../src/portfolio/parseList.ts';
 
 const PORT = Number(process.env.PORT ?? 3000);
 const DB = process.env.DATABASE_URL;
@@ -72,6 +74,47 @@ async function persistQuote(quote: Quote): Promise<boolean> {
   // distinguirlo de una inserción real para no informar de un refresco que no
   // ocurrió.
   return r.length > 0;
+}
+
+/**
+ * Lo que dice el proveedor sobre el instrumento, traducido al enum del
+ * esquema. Lo que no encaja va a 'other' en vez de forzarse a 'stock': decir
+ * "acción" de algo que no lo es contaminaría después la capa de filings.
+ */
+function tipoDeActivo(instrumentType: string | undefined, tieneCik: boolean): string {
+  const t = (instrumentType ?? '').toLowerCase();
+  if (t.includes('etf') || t.includes('exchange traded')) return 'etf';
+  if (t.includes('mutual fund')) return 'fund';
+  if (t.includes('crypto') || t.includes('digital currency')) return 'crypto';
+  if (t.includes('physical currency') || t.includes('forex')) return 'forex';
+  if (t.includes('commodity')) return 'commodity';
+  if (t.includes('common stock') || t.includes('depositary')) return 'stock';
+  return tieneCik ? 'stock' : 'other';
+}
+
+type CatalogoSec = Awaited<ReturnType<typeof loadSecTickers>> | null;
+
+/**
+ * Registra el símbolo si aún no está, combinando las dos fuentes.
+ *
+ * La SEC da el CIK, que es lo que abre la puerta a los filings; el proveedor
+ * de mercado da el nombre y el tipo de instrumento, que la SEC no cubre para
+ * ETF. Ninguna de las dos sobra.
+ */
+async function upsertSymbol(
+  symbol: string,
+  info: { name?: string; instrumentType?: string },
+  catalog: CatalogoSec
+): Promise<void> {
+  const existe = await q('SELECT symbol FROM symbols WHERE symbol = $1', [symbol]);
+  if (existe.length > 0) return;
+
+  const sec = catalog ? resolveSymbol(symbol, catalog) : null;
+  const cik = sec && !sec.notInSecRegistry ? sec.cik : null;
+  await q(
+    `INSERT INTO symbols (symbol, display_name, cik, asset_type) VALUES ($1,$2,$3,$4)`,
+    [symbol, info.name ?? sec?.displayName ?? null, cik, tipoDeActivo(info.instrumentType, cik !== null)]
+  );
 }
 
 function classify(f: SecFiling): string {
@@ -253,20 +296,135 @@ const routes: Record<string, (req: IncomingMessage, url: URL) => Promise<unknown
     return { updated, sinCambio, failed, total: results.length };
   },
 
+  /**
+   * Reconoce una cartera pegada como texto y, si se confirma, la registra.
+   *
+   * Dos pasos a propósito. Sin `confirm` sólo dice qué ha entendido: qué
+   * ticker es cada cosa, en qué mercado y en qué moneda. Como el mismo ticker
+   * puede ser productos distintos en mercados distintos (SOXL es un 3x de
+   * Direxion en NYSE y un 4x de otro emisor en Londres), conviene poder mirar
+   * antes de escribir.
+   */
+  /**
+   * Busca por ticker o por nombre. Devuelve todas las cotizaciones y cuál
+   * elegiría el sistema, para que se vea la diferencia cuando la hay.
+   */
+  'GET /api/search': async (_req, url) => {
+    const term = (url.searchParams.get('q') ?? '').trim();
+    if (!term) return { query: '', candidates: [] };
+    const key = process.env.TWELVEDATA_API_KEY ?? '';
+    return chooseListing(term, await searchSymbol(term, key));
+  },
+
+  'POST /api/portfolio/import': async (req) => {
+    const body = await readBody(req);
+    const texto = String(body.text ?? '');
+    const confirm = body.confirm === true;
+    const key = process.env.TWELVEDATA_API_KEY ?? '';
+
+    const parsed = parsePortfolioText(texto);
+    if (parsed.entries.length === 0) {
+      return { ...parsed, recognized: [], applied: false };
+    }
+
+    const recognized: Record<string, unknown>[] = [];
+    const catalog = await loadSecTickers({ userAgent: UA }).catch(() => null);
+
+    for (let i = 0; i < parsed.entries.length; i++) {
+      const e = parsed.entries[i];
+      // Secuencial y con pausa: el plan gratuito limita por minuto y una
+      // ráfaga en paralelo haría fallar a todos por igual.
+      if (i > 0) await new Promise(r => setTimeout(r, 250));
+
+      const fila: Record<string, unknown> = { symbol: e.symbol, quantity: e.quantity, line: e.line };
+      let elegido: Listing | undefined;
+
+      if (key) {
+        try {
+          const res = await resolveTicker(e.symbol, key);
+          elegido = res.chosen;
+          fila.ambiguous = res.ambiguous;
+          fila.reason = res.reason;
+          if (res.ambiguous) fila.candidates = res.candidates;
+        } catch (err) {
+          fila.reason = (err as Error).message;
+        }
+      } else {
+        fila.reason = 'sin TWELVEDATA_API_KEY no se puede reconocer el ticker';
+      }
+
+      if (elegido) {
+        fila.name = elegido.name;
+        fila.exchange = elegido.exchange;
+        fila.currency = elegido.currency;
+        fila.instrumentType = elegido.instrumentType;
+      }
+
+      // Dos decisiones distintas, y conviene no confundirlas:
+      //
+      // La POSICIÓN es un dato del usuario: él afirma tener 7.42 de QQQM. No
+      // hace falta que ningún proveedor lo confirme, y negarse a registrarla
+      // porque el ticker no se reconoce perdería lo único que sólo él sabe.
+      //
+      // El PRECIO sí depende de saber QUÉ instrumento es. Con un ticker que
+      // identifica a dos productos distintos, cualquier precio sería el de
+      // uno de los dos elegido al azar. Ahí no se pone precio y se dice por
+      // qué — igual que una posición sin precio no aporta peso a la cartera
+      // en vez de inventarse uno.
+      fila.willApply = true;
+      fila.willPrice = Boolean(elegido);
+      recognized.push(fila);
+    }
+
+    if (!confirm) {
+      return { ...parsed, recognized, applied: false };
+    }
+
+    const applied: string[] = [];
+    const errors: { symbol: string; error: string }[] = [];
+    for (const fila of recognized) {
+      if (!fila.willApply) continue;
+      const symbol = String(fila.symbol);
+      try {
+        await upsertSymbol(symbol, {
+          name: fila.name as string | undefined,
+          instrumentType: fila.instrumentType as string | undefined,
+        }, catalog);
+
+        if (fila.quantity !== null) {
+          await q(
+            `INSERT INTO portfolio_positions (symbol, quantity, effective_from, source, note)
+             VALUES ($1, $2, now(), 'import', $3)`,
+            [symbol, fila.quantity, `línea ${fila.line}`]
+          );
+        }
+
+        if (fila.willPrice) {
+          try {
+            const quote = await fetchQuote(symbol, key);
+            await persistQuote(quote);
+            fila.price = quote.price;
+            fila.quotedAt = quote.quotedAt.toISOString();
+          } catch (err) {
+            // La posición ya está guardada; que falte el precio no la anula.
+            fila.priceError = (err as Error).message;
+          }
+        }
+        applied.push(symbol);
+      } catch (err) {
+        errors.push({ symbol, error: (err as Error).message });
+      }
+    }
+
+    return { ...parsed, recognized, applied: true, appliedSymbols: applied, errors };
+  },
+
   'POST /api/position': async (req) => {
     const body = await readBody(req);
     const symbol = normalizeSymbol(String(body.symbol ?? ''));
     const quantity = validateQuantity(body.quantity);
 
-    const exists = await q('SELECT symbol FROM symbols WHERE symbol = $1', [symbol]);
-    if (exists.length === 0) {
-      const catalog = await loadSecTickers({ userAgent: UA });
-      const r = resolveSymbol(symbol, catalog);
-      await q(
-        `INSERT INTO symbols (symbol, display_name, cik, asset_type) VALUES ($1,$2,$3,$4)`,
-        [symbol, r.displayName, r.cik, r.notInSecRegistry ? 'other' : 'stock']
-      );
-    }
+    await upsertSymbol(symbol, {}, await loadSecTickers({ userAgent: UA }).catch(() => null));
 
     await q(
       `INSERT INTO portfolio_positions (symbol, quantity, effective_from, source, note)

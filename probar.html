@@ -40,7 +40,10 @@
   button:hover{filter:brightness(1.08)} button:disabled{opacity:.5;cursor:default}
   input{background:var(--bg);color:var(--fg);border:1px solid var(--line);
     border-radius:7px;padding:8px 10px;font:inherit;font-size:14px}
-  input:focus{outline:2px solid var(--acc);outline-offset:-1px}
+  input:focus,textarea:focus{outline:2px solid var(--acc);outline-offset:-1px}
+  textarea{width:100%;box-sizing:border-box;background:var(--bg);color:var(--fg);
+    border:1px solid var(--line);border-radius:7px;padding:10px 11px;resize:vertical;
+    font:13px/1.65 ui-monospace,SFMono-Regular,Menlo,monospace}
   .row{display:flex;gap:9px;flex-wrap:wrap;align-items:center}
   .tag{display:inline-block;font-size:10.5px;padding:2px 7px;border-radius:5px;
     border:1px solid var(--line);color:var(--mut);white-space:nowrap}
@@ -94,6 +97,21 @@
   </div>
   <p class="hint">Cualquier ticker sirve; se resuelve solo. <code>0</code> cierra la posición y el historial se conserva.</p>
   <div id="setres"></div>
+</section>
+
+<section>
+  <h2>Importar la cartera entera</h2>
+  <p class="hint">Pega la lista y se reconoce sola. Una por línea o separadas por comas:
+    <code>QQQM 7.42</code>, <code>LLY 0,88</code>, <code>$AAPL: 2.24</code>.
+    Un ticker sin cantidad se añade sólo para seguirlo.</p>
+  <textarea id="bulk" rows="7" spellcheck="false"
+    placeholder="QQQM 7.42 shares&#10;LLY 0.88&#10;AAPL 2.24&#10;AXP 1&#10;KO 3.56&#10;MU 0.3"></textarea>
+  <div class="row" style="margin-top:8px">
+    <button id="btnLeer" onclick="reconocer()">Reconocer</button>
+    <button id="btnAplicar" onclick="importar()" disabled>Guardar lo reconocido</button>
+    <span id="bulkest" class="sm mut"></span>
+  </div>
+  <div id="bulkres"></div>
 </section>
 
 <section>
@@ -317,6 +335,99 @@ async function verificar() {
   } catch (e) {
     $('vres').innerHTML = `<p class="err sm" style="margin:10px 0 0">${esc(e.message)}</p>`;
   } finally { $('btnVer').disabled = false; }
+}
+
+// --- importar la cartera pegada -------------------------------------------
+
+// Se guarda lo último reconocido para que "Guardar" mande EXACTAMENTE el texto
+// que se revisó, no lo que haya en el recuadro en ese momento.
+let textoReconocido = null;
+
+function pintarImportacion(r, aplicado) {
+  let h = '';
+
+  if (r.recognized && r.recognized.length) {
+    h += '<table style="margin-top:12px"><tr><th>Ticker</th><th>Cantidad</th>'
+       + '<th>Reconocido como</th></tr>';
+    for (const f of r.recognized) {
+      // La posición se guarda siempre; lo que puede faltar es el precio. Son
+      // dos cosas distintas y la tabla no las mezcla.
+      const detalle = f.willPrice
+        ? `${esc(f.name || '')} <span class="tag">${esc(f.exchange || '')}</span> `
+          + `<span class="tag">${esc(f.currency || '')}</span>`
+          + (f.price !== undefined ? ` <span class="ok">· ${num(f.price, 4)}</span>` : '')
+          + (f.priceError ? ` <span class="warn">· ${esc(f.priceError)}</span>` : '')
+        : `<span class="warn">se guarda sin precio — ${esc(f.reason || 'sin reconocer')}</span>`;
+      h += `<tr><td><b>${esc(f.symbol)}</b></td>`
+         + `<td class="r">${f.quantity === null ? '<span class="mut sm">seguir</span>' : num(f.quantity, 8)}</td>`
+         + `<td class="sm">${detalle}</td></tr>`;
+    }
+    h += '</table>';
+  }
+
+  // Las líneas que no se entendieron se enseñan siempre. Esconderlas dejaría
+  // una cartera incompleta con aspecto de completa.
+  if (r.failures && r.failures.length) {
+    h += `<p class="warn sm" style="margin:11px 0 0"><b>Sin entender:</b></p><ul class="sm mut">`
+       + r.failures.map(f => `<li>línea ${f.line}: <code>${esc(f.raw)}</code> — ${esc(f.reason)}</li>`).join('')
+       + '</ul>';
+  }
+  if (r.duplicates && r.duplicates.length) {
+    h += `<p class="mut sm" style="margin:11px 0 0">Repetidos (vale el último): `
+       + r.duplicates.map(d => `${esc(d.symbol)} (líneas ${d.lines.join(', ')})`).join(' · ') + '</p>';
+  }
+  if (aplicado) {
+    const n = (r.appliedSymbols || []).length;
+    h += `<p class="ok sm" style="margin:11px 0 0">Guardados ${n}: ${esc((r.appliedSymbols || []).join(', '))}</p>`;
+    if (r.errors && r.errors.length) {
+      h += `<p class="err sm" style="margin:7px 0 0">`
+         + r.errors.map(e => `${esc(e.symbol)}: ${esc(e.error)}`).join(' · ') + '</p>';
+    }
+  }
+  $('bulkres').innerHTML = h;
+}
+
+async function reconocer() {
+  const texto = $('bulk').value;
+  if (!texto.trim()) { $('bulkest').innerHTML = '<span class="warn">Pega algo primero.</span>'; return; }
+  $('btnLeer').disabled = true; $('btnAplicar').disabled = true;
+  $('bulkest').textContent = 'reconociendo…';
+  try {
+    const r = await api('/api/portfolio/import', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ text: texto }),
+    });
+    const total = (r.recognized || []).length;
+    const conPrecio = (r.recognized || []).filter(f => f.willPrice).length;
+    const sinPrecio = total - conPrecio;
+    $('bulkest').innerHTML = `<span class="${sinPrecio ? 'warn' : 'ok'}">`
+      + `${total} posición(es) leídas`
+      + (sinPrecio ? ` · ${sinPrecio} sin precio` : '') + '</span>';
+    pintarImportacion(r, false);
+    textoReconocido = total > 0 ? texto : null;
+    $('btnAplicar').disabled = total === 0;
+  } catch (e) {
+    $('bulkest').innerHTML = `<span class="err">${esc(e.message)}</span>`;
+    $('bulkres').innerHTML = '';
+  } finally { $('btnLeer').disabled = false; }
+}
+
+async function importar() {
+  if (textoReconocido === null) return;
+  $('btnLeer').disabled = true; $('btnAplicar').disabled = true;
+  $('bulkest').textContent = 'guardando…';
+  try {
+    const r = await api('/api/portfolio/import', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ text: textoReconocido, confirm: true }),
+    });
+    $('bulkest').innerHTML = '<span class="ok">hecho</span>';
+    pintarImportacion(r, true);
+    textoReconocido = null;
+    cartera(); plan();
+  } catch (e) {
+    $('bulkest').innerHTML = `<span class="err">${esc(e.message)}</span>`;
+  } finally { $('btnLeer').disabled = false; }
 }
 
 for (const id of ['sym', 'qty']) $(id).addEventListener('keydown', e => { if (e.key === 'Enter') guardar(); });
